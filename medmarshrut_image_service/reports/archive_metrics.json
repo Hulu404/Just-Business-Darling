@@ -1,0 +1,100 @@
+{
+  "report_type": "archive_audit_and_model_metrics",
+  "status": "model_metrics_not_computable",
+  "generated_at": "2026-10-03T17:29:21+03:00",
+  "source": {
+    "path": "D:\\Downloaders\\archive",
+    "overview_sha256": "273530f0cbe00ae34025a6f9d51bdd3a2cf100c32abceee9b27b0486058c41e9",
+    "overview_rows": 100,
+    "overview_columns": [
+      "",
+      "Age",
+      "Contrast",
+      "ContrastTag",
+      "raw_input_path",
+      "id",
+      "tiff_name",
+      "dicom_name"
+    ],
+    "dicom_count": 100,
+    "tiff_count": 100,
+    "npz_sha256": "a9d81a873dc214e376546efd89a6d2bee19b9e472251794d4a9f53a69c95b9e3",
+    "npz_arrays": {
+      "image.npy": {
+        "shape": [
+          475
+        ],
+        "dtype": "object",
+        "pickle_required": true
+      },
+      "idx.npy": {
+        "shape": [
+          475
+        ],
+        "dtype": "int64",
+        "pickle_required": false
+      }
+    }
+  },
+  "dataset_metrics": {
+    "unique_csv_ids": 100,
+    "csv_dicom_matches": 100,
+    "csv_tiff_matches": 100,
+    "contrast_counts": {
+      "False": 50,
+      "True": 50
+    },
+    "dicom_read_errors": 0,
+    "dicom_pixel_decode_ok": 100,
+    "dicom_nonconstant_images": 100,
+    "dicom_modalities": {
+      "CT": 100
+    },
+    "dicom_anatomy": {
+      "CHEST": 50,
+      "LUNG": 50
+    },
+    "unique_study_uids": 79,
+    "unique_series_uids": 95,
+    "unique_sop_uids": 95,
+    "unique_patient_ids": 54,
+    "duplicate_sop_uid_images": 5,
+    "patient_id_populated": 100,
+    "patient_name_populated": 100,
+    "institution_name_populated": 0,
+    "protocol_name_populated": 80,
+    "protocol_name_missing": 20,
+    "diagnostic_label_columns": [],
+    "institution_id_column_present": false
+  },
+  "model": {
+    "run_status": "not_run",
+    "reason": "No approved ONNX artifact was provided or found in the project."
+  },
+  "model_metrics": {
+    "evaluated_images": 0,
+    "threshold": null,
+    "confusion_matrix": {
+      "tp": null,
+      "tn": null,
+      "fp": null,
+      "fn": null
+    },
+    "sensitivity": null,
+    "specificity": null,
+    "precision": null,
+    "recall": null,
+    "brier_score": null,
+    "ece_10_bins": null,
+    "calibration_bins": null,
+    "subgroups": null,
+    "errors_by_study_type": null,
+    "external_validation": null,
+    "unavailable_reason": "No reference finding labels or predictions from an approved image model; no patient/site-disjoint evaluation manifest."
+  },
+  "data_limitations": [
+    "Contrast is acquisition metadata, not a diagnostic finding label.",
+    "The CSV contains source paths and ages; DICOM identity tags are present. De-identification must be verified before training or sharing.",
+    "The NPZ image array has object dtype and requires pickle; it was not deserialized. The DICOM files were audited directly."
+  ]
+}

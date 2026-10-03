@@ -159,6 +159,9 @@ def _read_instance(data: bytes, task: TaskConfig) -> dict:
         raise IntakeError("Invalid pixel spacing")
     item = {"study_uid": study_uid, "series_uid": series_uid, "sop_uid": sop_uid,
             "modality": modality, "rows": rows, "columns": columns, "spacing": spacing}
+    # Exact acquisition metadata is part of model selection, never inferred from a task name.
+    item["protocol_name"] = str(getattr(ds, "ProtocolName", "")).strip()
+    item["anatomy"] = str(getattr(ds, "BodyPartExamined", "")).strip().upper()
     if modality in {"CT", "MR"}:
         if modality == "CT":
             slope = _number(getattr(ds, "RescaleSlope", None), "RescaleSlope")
@@ -201,6 +204,7 @@ def _validate_series(items: list[dict], task: TaskConfig) -> dict:
         if len(views) != len(items):
             raise IntakeError("Duplicate mammography projections")
         result["views"] = sorted([f"{side}-{view}" for side, view in views])
+        result["projections"] = {x["sop_uid"]: f"{x['laterality']}-{x['view']}" for x in items}
         return result
     if len(items) < task.min_instances:
         raise IntakeError("Too few slices for CT/MR series")
@@ -255,6 +259,10 @@ def inspect_archive(archive_bytes: bytes, manifest: dict) -> dict:
     if set(groups) != set(manifest["series"]):
         raise IntakeError("Missing or unexpected series")
     summaries = {}
+    protocols = {x["protocol_name"] for group in groups.values() for x in group}
+    anatomies = {x["anatomy"] for group in groups.values() for x in group}
+    if len(protocols) != 1 or len(anatomies) != 1:
+        raise IntakeError("Mixed acquisition protocols or anatomy")
     for series_uid, expected in manifest["series"].items():
         actual = {x["sop_uid"] for x in groups[series_uid]}
         if actual != set(expected):
@@ -265,4 +273,5 @@ def inspect_archive(archive_bytes: bytes, manifest: dict) -> dict:
         if views != task.required_views or sum(len(x) for x in groups.values()) != 4:
             raise IntakeError("Incomplete screening mammography: L/R CC and MLO required")
     return {"task": task.name, "modality": task.modality, "study_uid": manifest["study_uid"],
+            "protocol_name": next(iter(protocols)), "anatomy": next(iter(anatomies)),
             "series": summaries, "instance_count": len(seen)}
