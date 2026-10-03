@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import hmac
 import json
 import os
+import re
 import secrets
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as InferenceTimeout
@@ -62,7 +65,7 @@ def _validate_result(result: dict, study: dict) -> None:
 
 class StudyService:
     def __init__(self, backend: ModelBackend | None = None, *, timeout_seconds: float = 30,
-                 router_url: str | None = None) -> None:
+                 router_url: str | None = None, router_secret: str | None = None) -> None:
         self.backend = backend
         self.load_error = None
         if backend is not None:
@@ -72,8 +75,14 @@ class StudyService:
                 self.load_error = f"Model load failed: {exc}"
         self.timeout_seconds = timeout_seconds
         self.router_url = router_url
-        if router_url and not router_url.startswith("http://127.0.0.1:"):
-            raise ValueError("Router URL must use loopback")
+        self.router_secret = router_secret
+        if router_url and not router_secret:
+            raise ValueError("PATH_SHARED_SECRET is required when ROUTER_URL is set")
+        if router_url:
+            target = urlsplit(router_url)
+            if (target.scheme != "http" or target.hostname != "127.0.0.1" or not target.port
+                    or target.path != "/v1/reports" or target.query or target.fragment or target.username):
+                raise ValueError("Router URL must be a loopback /v1/reports endpoint")
         self._jobs: dict[str, dict] = {}
         self._archives: dict[str, bytes] = {}
         self._lock = Lock()
@@ -163,30 +172,43 @@ class StudyService:
                 raise ReviewError("Study not found")
             if job["status"] != "awaiting_physician":
                 raise ReviewError("Study is not awaiting physician confirmation")
-            if not isinstance(body, dict) or set(body) != {"physician_id", "conclusion", "edits", "finding_code"}:
+            if not isinstance(body, dict) or not {"physician_id", "conclusion", "edits", "finding_code"} <= set(body) or set(body) - {"physician_id", "conclusion", "edits", "finding_code", "patient_ref"}:
                 raise ReviewError("Invalid confirmation fields")
             physician = body["physician_id"]
             conclusion = body["conclusion"]
             edits = body["edits"]
             code = body["finding_code"]
-            if (not isinstance(physician, str) or not 1 <= len(physician) <= 128
-                    or not isinstance(conclusion, str) or not 1 <= len(conclusion) <= 4000
+            patient_ref = body.get("patient_ref")
+            if (not isinstance(physician, str) or not physician.strip() or not 1 <= len(physician) <= 128
+                    or not isinstance(conclusion, str) or not conclusion.strip() or not 1 <= len(conclusion) <= 4000
                     or not isinstance(edits, list) or not all(isinstance(x, str) and len(x) <= 1000 for x in edits)
+                    or (patient_ref is not None and (not isinstance(patient_ref, str)
+                        or not re.fullmatch(r"[A-Za-z0-9_.:-]{2,128}", patient_ref)))
                     or code not in {f["code"] for f in job["result"]["findings"]}):
                 raise ReviewError("Invalid physician confirmation or finding code")
             finding = next(f for f in job["result"]["findings"] if f["code"] == code)
-            payload = {"study_type": {"CT": "ct", "MG": "mammography"}.get(job["study"]["modality"]),
+            confirmed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            payload = {"study_type": {"CT": "ct", "MR": "mr", "MG": "mammography"}.get(job["study"]["modality"]),
                        "finding_code": code, "conclusion": conclusion, "confidence": finding["confidence"],
-                       "source_report_id": job_id, "source_model": job["result"]["model_version"]}
+                       "source_report_id": job_id, "source_model": job["result"]["model_version"],
+                       "source_service": "medmarshrut_image_service", "source_report_version": 1,
+                       "confirmation_status": "confirmed",
+                       "physician_id": physician, "confirmed_at": confirmed_at,
+                       "study_uid": job["study"]["study_uid"], "anatomy": job["study"]["anatomy"],
+                       "protocol_name": job["study"]["protocol_name"], "patient_ref": patient_ref}
             job.update(status="confirmed", edits=edits,
                        confirmation={"physician_id": physician, "conclusion": conclusion,
-                                     "confirmed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                     "confirmed_at": confirmed_at,
                                      "routing_payload": payload},
                        routing_status="pending" if self.router_url and payload["study_type"] else "not_configured_or_unsupported")
         if self.router_url and payload["study_type"]:
             try:
-                request = Request(self.router_url, data=json.dumps(payload).encode(),
-                                  headers={"Content-Type": "application/json"}, method="POST")
+                data = json.dumps(payload, ensure_ascii=False).encode()
+                timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+                signature = "sha256=" + hmac.new(self.router_secret.encode(), timestamp.encode() + b"." + data, hashlib.sha256).hexdigest()
+                request = Request(self.router_url, data=data,
+                                  headers={"Content-Type": "application/json", "X-Path-Timestamp": timestamp,
+                                           "X-Path-Signature": signature}, method="POST")
                 with urlopen(request, timeout=5) as response:
                     if not 200 <= response.status < 300:
                         raise OSError("Router rejected report")
@@ -294,6 +316,7 @@ if __name__ == "__main__":
     if not token:
         raise SystemExit("REVIEWER_TOKEN is required")
     server = ThreadingHTTPServer(("127.0.0.1", 8766), make_handler(
-        StudyService(backend, router_url=os.environ.get("ROUTER_URL")), token))
+        StudyService(backend, router_url=os.environ.get("ROUTER_URL"),
+                     router_secret=os.environ.get("PATH_SHARED_SECRET")), token))
     print("DICOM review API: http://127.0.0.1:8766")
     server.serve_forever()

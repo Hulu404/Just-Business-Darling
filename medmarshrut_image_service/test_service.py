@@ -1,10 +1,12 @@
 import io
+import hmac
+import hashlib
 import json
 import unittest
 import zipfile
 import tempfile
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from pydicom.dataset import FileDataset, FileMetaDataset
@@ -194,13 +196,47 @@ class IngestTests(unittest.TestCase):
 
     def test_test_backend_never_routes(self):
         with patch("service.urlopen") as send:
-            service = StudyService(TestBackend(), router_url="http://127.0.0.1:8765/api/analyze")
+            service = StudyService(TestBackend(), router_url="http://127.0.0.1:8765/v1/reports", router_secret="test-secret")
             job = service.submit(*bundle())
             self.assertEqual(job["status"], "test_only")
             with self.assertRaises(ReviewError):
                 service.confirm(job["id"], {"physician_id": "doctor-1", "conclusion": "x",
                                             "edits": [], "finding_code": "TEST"})
             send.assert_not_called()
+
+    def test_confirmed_mr_report_is_signed_and_sent(self):
+        class SyntheticModel(TestBackend):
+            def infer_local(self, study, task, archive):
+                series_uid, series = next(iter(study["series"].items()))
+                return {"kind": "model_inference", "backend": "SyntheticModelForTest",
+                        "model_version": "fixture-1", "weights_sha256": "fixture-only",
+                        "preprocessing_version": "fixture-1", "modality": "MR", "anatomy": "CHEST",
+                        "diagnostic_task": "synthetic check", "input_quality": {"pixel_decode_ok": True},
+                        "limitations": ["synthetic"], "findings": [{"code": "TEST", "description": "synthetic",
+                        "confidence": 0.01, "localization": {"series_uid": series_uid,
+                        "sop_uid": series["ordered_sop_uids"][0], "slice_index": 1}}],
+                        "refusal_reason": None}
+
+        secret = "test-shared-secret-long"
+        service = StudyService(SyntheticModel(), router_url="http://127.0.0.1:8765/v1/reports", router_secret=secret)
+        job = service.submit(*bundle("MR"))
+        response = MagicMock()
+        response.status = 201
+        response.__enter__.return_value = response
+        with patch("service.urlopen", return_value=response) as send:
+            result = service.confirm(job["id"], {"physician_id": "doctor-1", "conclusion": "reviewed",
+                "edits": [], "finding_code": "TEST", "patient_ref": "patient-1"})
+        self.assertEqual(result["routing_status"], "sent")
+        request = send.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(payload["study_type"], "mr")
+        self.assertEqual(payload["confirmation_status"], "confirmed")
+        self.assertEqual(payload["physician_id"], "doctor-1")
+        self.assertEqual(payload["source_report_version"], 1)
+        self.assertEqual(payload["patient_ref"], "patient-1")
+        timestamp = request.get_header("X-path-timestamp")
+        expected = "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + request.data, hashlib.sha256).hexdigest()
+        self.assertEqual(request.get_header("X-path-signature"), expected)
 
 
 if __name__ == "__main__":

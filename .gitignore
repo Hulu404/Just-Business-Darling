@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+medmarshrut_path_service/*.sqlite3
+medmarshrut_path_service/*.sqlite3-*

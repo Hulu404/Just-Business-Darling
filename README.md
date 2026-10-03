@@ -1,12 +1,14 @@
 # Just-Business-Darling
 
-В этом репозитории находится локальный микросервис приёма DICOM, инференса через установленную локальную модель и врачебного подтверждения заключения. Сервис маршрутизации работает отдельно; заключение передаётся ему только после подтверждения врачом.
+В репозитории находятся локальный сервис снимков и отдельный [сервис сопровождения пациента](medmarshrut_path_service/README.md). Заключение передаётся после подтверждения врачом, включая МРТ.
 
 ## Запуск из корня репозитория
 
 ```powershell
 python -m pip install -r .\medmarshrut_image_service\requirements.txt
 $env:REVIEWER_TOKEN = 'replace-with-long-random-secret'
+$env:ROUTER_URL = 'http://127.0.0.1:8765/v1/reports'
+$env:PATH_SHARED_SECRET = 'replace-with-at-least-16-random-characters'
 python .\medmarshrut_image_service\service.py
 ```
 
@@ -14,8 +16,11 @@ API доступен на `http://127.0.0.1:8766`. По умолчанию ко�
 
 Полный [контракт API, формата ZIP и манифеста](medmarshrut_image_service/README.md) находится в папке микросервиса.
 
+Сервис маршрута запускается в другом терминале с тем же `PATH_SHARED_SECRET` и отдельным `PATH_ADMIN_TOKEN`. Полные команды и контракт приведены в его README. Поставляемые правила пусты: заключения требуют ручного разбора до утверждения правил клиникой.
+
 ## Тесты
 
 ```powershell
-python -m unittest discover -s .\medmarshrut_image_service -p 'test_service.py' -v
+python -B -m unittest discover -s .\medmarshrut_image_service -p 'test_*.py' -v
+python -B -m unittest discover -s .\medmarshrut_path_service -p 'test_*.py' -v
 ```
