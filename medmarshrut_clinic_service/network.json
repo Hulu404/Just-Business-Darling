@@ -1,0 +1,15 @@
+{
+  "version": "demo-network-1",
+  "clinics": [
+    {"id": "clinic-central", "name": "Central Clinic", "network": "demo-network", "active": true},
+    {"id": "clinic-partner-1", "name": "Partner Clinic North", "network": "demo-network", "active": true}
+  ],
+  "capabilities": [
+    {"clinic_id": "clinic-central", "study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-central", "study_type": "mr", "anatomy": "BRAIN", "protocol_name": "MR_BRAIN", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-partner-1", "study_type": "mr", "anatomy": "BRAIN", "protocol_name": "MR_BRAIN", "finding_code": "*", "approved": true}
+  ],
+  "partnerships": [
+    {"clinic_a": "clinic-central", "clinic_b": "clinic-partner-1", "direction": "mutual", "active": true, "since": "2026-01-01T00:00:00+00:00"}
+  ]
+}
