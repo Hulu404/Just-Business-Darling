@@ -295,7 +295,7 @@ class EpisodeStore:
             before, after = allowed[action]
             if step.status not in before or step.kind == "manual_review":
                 raise ConflictError(f"Step must be one of {sorted(before)}")
-            if action == "offer" and any(s.position < step.position and s.status != "completed" for s in episode.plan_steps):
+            if action == "offer" and any(s.position < step.position and s.status not in {"completed", "superseded"} for s in episode.plan_steps):
                 raise ConflictError("Earlier plan step is unfinished")
             stamp = now()
             self.db.execute("UPDATE plan_steps SET status=?,appointment_at=COALESCE(?,appointment_at),due_at=COALESCE(?,due_at),stop_reason=? WHERE id=?",

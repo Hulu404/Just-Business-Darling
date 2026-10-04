@@ -73,6 +73,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.episode.status, "active")
         self.assertGreater(len(self.store.outbox()), 1)
 
+    def test_offer_after_refusal_and_revision(self):
+        step = self.episode.plan_steps[1]
+        self.episode = self.store.transition(self.episode.id, step.id, "offer", "coordinator-1",
+            evidence="Offered", appointment_at="2026-10-04T10:00:00+00:00")
+        self.episode = self.store.transition(self.episode.id, step.id, "refuse", "coordinator-1", evidence="Patient declined")
+        self.episode = self.store.revise_plan(self.episode.id, "doctor-1", "Patient requested another clinic",
+                                               [next_step("Revised consultation")])
+        revised = self.episode.plan_steps[-1]
+        self.episode = self.store.transition(self.episode.id, revised.id, "offer", "coordinator-1",
+            evidence="Offered again", appointment_at="2026-10-06T10:00:00+00:00")
+        self.assertEqual(self.episode.plan_steps[1].status, "superseded")
+        self.assertEqual(self.episode.plan_steps[-1].status, "offered")
+
     def test_cancel_lost_contact_and_closure(self):
         step = self.episode.plan_steps[1]
         self.episode = self.store.transition(self.episode.id, step.id, "offer", "coordinator-1",

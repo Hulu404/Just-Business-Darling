@@ -1,0 +1,26 @@
+{
+  "staff": [
+    {"id": "coordinator-natalia", "name": "Наталья", "title": "координатор", "clinic_id": "clinic-central"},
+    {"id": "radiologist-ershov", "name": "Д. Ершов", "title": "врач-рентгенолог", "clinic_id": "clinic-central"},
+    {"id": "therapist-sokolova", "name": "А. Соколова", "title": "врач-терапевт", "clinic_id": "clinic-central"},
+    {"id": "pulmonologist-lebedev", "name": "В. Лебедев", "title": "врач-пульмонолог", "clinic_id": "clinic-central"},
+    {"id": "doctor-demo", "name": "Врач клиники, демо-роль", "title": "врач", "clinic_id": "clinic-central"},
+    {"id": "partner1-coordinator", "name": "Ирина М.", "title": "координатор, демо-роль", "clinic_id": "clinic-partner-1"},
+    {"id": "partner2-coordinator", "name": "Ольга Д.", "title": "координатор, демо-роль", "clinic_id": "clinic-partner-2"}
+  ],
+  "roles": {
+    "staff": "coordinator-natalia",
+    "doctor": "doctor-demo",
+    "partner": {"clinic-partner-1": "partner1-coordinator", "clinic-partner-2": "partner2-coordinator"},
+    "patient": "demo-patient-1"
+  },
+  "patients": [
+    {"patient_ref": "demo-patient-1", "name": "Демо-пациент", "full_name": "Демо-пациент", "birth_date": "1984-03-12", "sex": "M", "contact": "demo-patient-1@example.invalid"},
+    {"patient_ref": "demo-patient-2", "name": "Мария К.", "full_name": "Мария Кузнецова", "birth_date": "1971-07-25", "sex": "F", "contact": "demo-patient-2@example.invalid"},
+    {"patient_ref": "demo-patient-3", "name": "Олег Р.", "full_name": "Олег Романов", "birth_date": "1963-11-02", "sex": "M", "contact": "demo-patient-3@example.invalid"},
+    {"patient_ref": "demo-patient-4", "name": "Елена П.", "full_name": "Елена Павлова", "birth_date": "1990-01-19", "sex": "F", "contact": "demo-patient-4@example.invalid"},
+    {"patient_ref": "demo-patient-5", "name": "Сергей Т.", "full_name": "Сергей Тихонов", "birth_date": "1978-09-08", "sex": "M", "contact": "demo-patient-5@example.invalid"},
+    {"patient_ref": "demo-patient-6", "name": "Игорь С.", "full_name": "Игорь Смирнов", "birth_date": "1969-05-30", "sex": "M", "contact": "demo-patient-6@example.invalid"},
+    {"patient_ref": "demo-patient-7", "name": "Нина В.", "full_name": "Нина Васильева", "birth_date": "1987-12-14", "sex": "F", "contact": "demo-patient-7@example.invalid"}
+  ]
+}
