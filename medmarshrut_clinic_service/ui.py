@@ -18,9 +18,10 @@ document.getElementById('load').onclick=async()=>{result.replaceChildren();try{
  el('h2','Очередь',result);if(!queue.cases.length)el('p','Очередь пуста',result);
  for(const item of queue.cases){const card=el('article','',result);el('h3',item.kind+' · '+item.patient_ref,card);
   el('p','referral '+item.referral_id,card);
-  const button=el('button','Открыть карту',card);
-  button.onclick=async()=>{try{const card=await api('/v1/patients/'+item.patient_id+'/card');
-   const pre=card.querySelector('pre')||el('pre','',card);pre.textContent=JSON.stringify(card,null,2)}
+    const button=el('button','Открыть карту',card);
+  button.onclick=async()=>{try{const data=await api('/v1/patients/'+item.patient_id+'/card');
+   const details=el('article','',card);el('h3','Карта пациента',details);
+   el('pre',JSON.stringify(data,null,2),details)}
    catch(e){el('p',e.message,card).className='error'}}}
 }catch(e){el('p',e.message,result).className='error'}};
 </script></html>"""

@@ -424,14 +424,23 @@ class ClinicStore:
                               "patient_id": row["patient_id"], "patient_ref": row["patient_ref"],
                               "from_clinic_id": row["from_clinic_id"], "reason": row["reason"],
                               "created_at": row["created_at"]})
-            accepted = self.db.execute(
+            accepted_from_me = self.db.execute(
                 "SELECT r.*, p.patient_ref FROM referrals r JOIN patients p ON p.id=r.patient_id "
                 "WHERE r.from_clinic_id=? AND r.status='accepted' ORDER BY r.created_at",
                 (clinic_id,)).fetchall()
-            for row in accepted:
+            for row in accepted_from_me:
                 cases.append({"kind": "awaiting_completion", "referral_id": row["id"],
-                              "patient_id": row["patient_id"], "patient_ref": row["patient_ref"],
-                              "to_clinic_id": row["to_clinic_id"], "created_at": row["created_at"]})
+                            "patient_id": row["patient_id"], "patient_ref": row["patient_ref"],
+                            "to_clinic_id": row["to_clinic_id"], "created_at": row["created_at"]})
+
+            accepted_to_me = self.db.execute(
+                "SELECT r.*, p.patient_ref FROM referrals r JOIN patients p ON p.id=r.patient_id "
+                "WHERE r.to_clinic_id=? AND r.status='accepted' ORDER BY r.created_at",
+                (clinic_id,)).fetchall()
+            for row in accepted_to_me:
+                cases.append({"kind": "awaiting_completion", "referral_id": row["id"],
+                            "patient_id": row["patient_id"], "patient_ref": row["patient_ref"],
+                            "from_clinic_id": row["from_clinic_id"], "created_at": row["created_at"]})
             return cases
 
     def metrics(self, clinic_id: str) -> dict:
