@@ -1,0 +1,22 @@
+{
+  "version": "demo-inventory-1",
+  "inventory": [
+    {"pharmacy_id": "pharm-central", "medication_id": "med-amoxil-500-caps", "stock": 42, "price": 380.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-amoxil-forte-500-caps", "stock": 12, "price": 410.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-hiconcil-500-caps", "stock": 8, "price": 350.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-panadol-500-tab", "stock": 200, "price": 120.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-nurofen-400-tab", "stock": 80, "price": 180.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-losec-20-caps", "stock": 30, "price": 520.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-omez-20-caps", "stock": 45, "price": 280.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-central", "medication_id": "med-vitd3-drops", "stock": 60, "price": 240.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-north", "medication_id": "med-amoxil-500-caps", "stock": 25, "price": 395.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-north", "medication_id": "med-hiconcil-500-caps", "stock": 5, "price": 340.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-north", "medication_id": "med-efferalgan-500-tab", "stock": 150, "price": 130.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-north", "medication_id": "med-brufen-400-tab", "stock": 60, "price": 170.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-north", "medication_id": "med-omez-20-caps", "stock": 100, "price": 260.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-south", "medication_id": "med-amoxil-500-caps", "stock": 0, "price": 375.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-south", "medication_id": "med-amoxil-forte-500-caps", "stock": 40, "price": 405.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-south", "medication_id": "med-nurofen-400-tab", "stock": 90, "price": 175.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"},
+    {"pharmacy_id": "pharm-south", "medication_id": "med-losec-20-caps", "stock": 15, "price": 540.00, "currency": "RUB", "updated_at": "2026-10-04T09:00:00+00:00"}
+  ]
+}
