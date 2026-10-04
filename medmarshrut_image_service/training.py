@@ -25,7 +25,7 @@ def task_config(path: Path) -> dict:
                 "label_code", "label_description", "input_size", "threshold", "epochs", "batch_size", "learning_rate", "seed", "preprocessing_version", "limitations"}
     if not isinstance(c, dict) or set(c) != required:
         raise ValueError("Task configuration fields differ from schema")
-    if c["task"] not in TASKS or c["modality"] != TASKS[c["task"]].modality:
+    if c["task"] not in TASKS or c["modality"] not in TASKS[c["task"]].modalities:
         raise ValueError("Unsupported task/modality")
     for key in ("model_version", "anatomy", "protocol_name", "diagnostic_task", "label_code", "label_description"):
         if not isinstance(c[key], str) or not c[key].strip():

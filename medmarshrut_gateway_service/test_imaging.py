@@ -33,7 +33,7 @@ def load_synthetic():
 
 SYNTHETIC = load_synthetic()
 DEMO_TEXTS = json.loads((REPO / "demo_stand" / "conclusions.demo.json").read_text(encoding="utf-8"))
-TASK = {"ct": "ct_general", "mr": "mr_general", "mg": "mg_screening_2d"}
+TASK = {"ct": "ct_general", "mr": "mr_general", "mg": "mg_screening_2d", "xr": "xr_general"}
 
 
 def service_check(archive: bytes, manifest: dict) -> subprocess.CompletedProcess:
@@ -70,14 +70,14 @@ def zipped(entries: list[tuple[str, int]]) -> bytes:
 
 class ManifestTests(unittest.TestCase):
     def test_manifest_from_kit_archives_passes_the_real_check(self):
-        for kind in ("ct", "mr", "mg"):
+        for kind in ("ct", "mr", "mg", "xr"):
             with self.subTest(kind=kind):
                 archive, expected = SYNTHETIC.build_study(kind, 3)
                 manifest = build_manifest(archive, TASK[kind])
                 self.assertEqual(manifest, expected)
                 result = service_check(archive, manifest)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(int(result.stdout), 4 if kind == "mg" else 3)
+                self.assertEqual(int(result.stdout), {"mg": 4, "xr": 1}.get(kind, 3))
 
     def test_two_studies_rejected(self):
         with self.assertRaises(GatewayError) as caught:

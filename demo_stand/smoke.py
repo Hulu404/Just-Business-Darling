@@ -293,6 +293,28 @@ def main() -> int:
               f"песочница: {body}")
         return "рентген грудной клетки → «Приём терапевта в течение 24 часов» по утверждённому правилу"
 
+    def step21():
+        patient = Gateway("patient", patient_ref=ref)
+        archive = (kit_dir / load_json(kit_dir / "kit.json")["smoke-xr"]["archive"]).read_bytes()
+        study = expect(*patient.call("POST", "/api/patient/studies?task=xr_general&consent=1", raw=archive,
+                                     content_type="application/zip"), 201, "Рентген через шлюз")["study"]
+        check(study["status"] == "awaiting", f"статус рентгена: {study}")
+        doctor = Gateway("doctor")
+        detail = expect(*doctor.call("GET", f"/api/doctor/studies/{study['id']}"), 200, "Рентген у врача")["study"]
+        check([i["label"] for i in detail["images"]] == ["Проекция PA"] and detail["findings"][0]["place"] == "Проекция PA",
+              f"рентген у врача: {detail['images']}, {detail['findings']}")
+        status, png = doctor.call("GET", f"/api/doctor/studies/{study['id']}/images/{detail['images'][0]['sop_uid']}.png")
+        check(status == 200 and png.startswith(b"\x89PNG"), f"PNG рентгена: {status}")
+        nxt = expect(*doctor.call("POST", f"/api/doctor/studies/{study['id']}/confirm",
+                                  {"conclusion": detail["templates"]["DEMO_XR_INFILTRATE"]}), 200, "Подтверждение рентгена")["next"]
+        check(nxt.get("step") == "Приём терапевта в течение 24 часов", f"что дальше: {nxt}")
+        episode = find_episode(study["id"])
+        check(episode["source_report"]["study_type"] == "xray", f"study_type: {episode['source_report']['study_type']}")
+        mine = next(s for s in expect(*patient.call("GET", "/api/patient/studies"), 200, "Исследования")["studies"] if s["id"] == study["id"])
+        check(mine["title"] == "Рентгенография органов грудной клетки" and mine["explanation"]["seen"].startswith("В нижней части правого лёгкого"),
+              f"у пациента: {mine['title']}, {mine['explanation']}")
+        return "проекция PA, PNG, подтверждение → study_type xray → «Приём терапевта в течение 24 часов», объяснение у пациента"
+
     steps = [("Регистрация пациента в сервисе клиники", step1),
              ("Загрузка учебной КТ", step2),
              ("Загрузка КТ не из учебного набора", step3),
@@ -312,7 +334,8 @@ def main() -> int:
              ("Кандидаты и направление через шлюз", step17),
              ("Партнёр принимает направление", step18),
              ("Запись у партнёра, услуга оказана, визит", step19),
-             ("Песочница правил: рентген", step20)]
+             ("Песочница правил: рентген", step20),
+             ("Рентгенограмма через шлюз до шага плана", step21)]
     print(f"Смоук-проверка на пациенте {ref}", flush=True)
     for number, (title, run) in enumerate(steps, 1):
         try:

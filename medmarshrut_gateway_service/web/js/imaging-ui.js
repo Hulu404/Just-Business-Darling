@@ -111,7 +111,7 @@ export function imagingPage(){
 export function uploadModal(){
   openModal(`${modalHead('Сервис «Что на снимке?»', 'Загрузить снимок')}
     <p>Подойдёт исследование из другой клиники. ИИ подготовит черновик, врач его проверит, и вы получите объяснение и план.</p>
-    <div class="field"><label for="upKind">Что за исследование</label><select id="upKind"><option value="ct_general">КТ</option><option value="mg_screening_2d">Маммография</option><option value="mr_general">МРТ</option></select></div>
+    <div class="field"><label for="upKind">Что за исследование</label><select id="upKind"><option value="xr_general">Рентгенография</option><option value="ct_general">КТ</option><option value="mg_screening_2d">Маммография</option><option value="mr_general">МРТ</option></select></div>
     <div class="field" style="margin-top:14px"><label for="upFile">Файл</label><input id="upFile" type="file" accept=".zip,application/zip"><small>ZIP-архив с файлами DICOM, до 50 МиБ. Демо-стенд: загружайте только учебные архивы, не настоящие снимки.</small></div>
     <label class="checkline" style="margin-top:14px"><input type="checkbox" id="upConsent"><span>Разрешаю передать исследование врачу клиники «Линия здоровья» для описания</span></label>
     <div class="actions">${btn('Отправить врачу', 'upload')}${btn('Взять учебное исследование', 'uploadKit', 'secondary')}${btn('Отмена', 'close', 'secondary')}</div>

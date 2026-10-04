@@ -15,9 +15,10 @@ MAX_CONFIRM_BODY = 8192
 MAX_CONCLUSION = 3500
 EDITED = "Текст черновика изменён врачом"
 
-TASKS = {"ct_general": "КТ", "mr_general": "МРТ", "mg_screening_2d": "Маммография"}
-MODALITY_TYPES = {"CT": "ct", "MR": "mr", "MG": "mammography"}
-MG_ORDER = ["L-CC", "L-MLO", "R-CC", "R-MLO"]
+TASKS = {"ct_general": "КТ", "mr_general": "МРТ", "mg_screening_2d": "Маммография", "xr_general": "Рентгенография"}
+MODALITY_TYPES = {"CT": "ct", "MR": "mr", "MG": "mammography", "CR": "xray", "DX": "xray"}
+PROJECTION_MODALITIES = {"MG", "CR", "DX"}  # localised by projection, not by slice
+PROJECTION_ORDER = ["L-CC", "L-MLO", "R-CC", "R-MLO", "PA", "AP", "LL", "RL", "LATERAL"]
 
 # Image service reasons (English, prefix match) -> text for the physician. Patients and coordinators never see them.
 REASONS = [
@@ -88,7 +89,7 @@ def build_manifest(archive_bytes: bytes, task: str) -> dict:
     tag values are never logged. Everything else (modality, SOP class, completeness) is the service's check.
     """
     if task not in TASKS:
-        raise GatewayError(400, "invalid_input", "Выберите вид исследования: КТ, МРТ или маммография.")
+        raise GatewayError(400, "invalid_input", "Выберите вид исследования: рентгенография, КТ, МРТ или маммография.")
     from pydicom import dcmread
     try:
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
@@ -140,9 +141,9 @@ def images(study: dict | None) -> list[dict]:
         return []
     result = []
     for series_uid, series in (study.get("series") or {}).items():
-        if study.get("modality") == "MG":
+        if study.get("modality") in PROJECTION_MODALITIES:
             projections = series.get("projections") or {}
-            for sop, name in sorted(projections.items(), key=lambda x: MG_ORDER.index(x[1]) if x[1] in MG_ORDER else 9):
+            for sop, name in sorted(projections.items(), key=lambda x: PROJECTION_ORDER.index(x[1]) if x[1] in PROJECTION_ORDER else 9):
                 result.append({"sop_uid": sop, "series_uid": series_uid, "label": "Проекция " + name})
         else:
             order = series.get("ordered_sop_uids") or []

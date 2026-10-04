@@ -12,9 +12,10 @@ from pathlib import PurePosixPath
 
 from pydicom import dcmread
 from pydicom.errors import InvalidDicomError
-from pydicom.uid import CTImageStorage, MRImageStorage, DigitalMammographyXRayImageStorageForPresentation
+from pydicom.uid import (CTImageStorage, MRImageStorage, DigitalMammographyXRayImageStorageForPresentation,
+                         ComputedRadiographyImageStorage, DigitalXRayImageStorageForPresentation)
 
-from model import TASKS, TaskConfig
+from model import TASKS, XRAY_MODALITIES, TaskConfig
 
 
 MAX_ARCHIVE = 50 * 1024 * 1024
@@ -23,7 +24,10 @@ MAX_FILE = 40 * 1024 * 1024
 MAX_FILES = 512
 UID_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)+$")
 SOP = {"CT": str(CTImageStorage), "MR": str(MRImageStorage),
-       "MG": str(DigitalMammographyXRayImageStorageForPresentation)}
+       "MG": str(DigitalMammographyXRayImageStorageForPresentation),
+       "CR": str(ComputedRadiographyImageStorage), "DX": str(DigitalXRayImageStorageForPresentation)}
+XRAY_FRONTAL = {"PA", "AP"}
+XRAY_LATERAL = {"LL", "RL", "LATERAL"}
 TRANSFER_SYNTAXES = {"1.2.840.10008.1.2", "1.2.840.10008.1.2.1"}
 
 
@@ -123,7 +127,7 @@ def _read_instance(data: bytes, task: TaskConfig) -> dict:
     except (InvalidDicomError, ValueError, EOFError, OSError):
         raise IntakeError("Archive contains an invalid DICOM file") from None
     modality = str(getattr(ds, "Modality", ""))
-    if modality != task.modality:
+    if modality not in task.modalities:
         raise IntakeError("Modality does not match selected task")
     if str(getattr(ds, "SOPClassUID", "")) != SOP[modality]:
         raise IntakeError("Unsupported DICOM SOP class or protocol")
@@ -154,7 +158,10 @@ def _read_instance(data: bytes, task: TaskConfig) -> dict:
         raise IntakeError("Unsupported pixel dimensions or encoding")
     if "PixelData" not in ds or len(ds.PixelData) != rows * columns * bits // 8 + (rows * columns * bits // 8) % 2:
         raise IntakeError("Missing or incomplete pixel data")
-    spacing = _vector(getattr(ds, "PixelSpacing", None), 2, "PixelSpacing")
+    raw_spacing = getattr(ds, "PixelSpacing", None)
+    if raw_spacing is None and modality in XRAY_MODALITIES:  # projection X-ray often has only the detector spacing
+        raw_spacing = getattr(ds, "ImagerPixelSpacing", None)
+    spacing = _vector(raw_spacing, 2, "PixelSpacing")
     if any(not 0 < x <= 10 for x in spacing):
         raise IntakeError("Invalid pixel spacing")
     item = {"study_uid": study_uid, "series_uid": series_uid, "sop_uid": sop_uid,
@@ -179,6 +186,13 @@ def _read_instance(data: bytes, task: TaskConfig) -> dict:
         except (AttributeError, TypeError, ValueError):
             raise IntakeError("Missing InstanceNumber") from None
         item.update(orientation=orientation, position=position, instance_number=instance_number)
+    elif modality in XRAY_MODALITIES:
+        view = str(getattr(ds, "ViewPosition", "")).upper()
+        if view not in XRAY_FRONTAL | XRAY_LATERAL:
+            raise IntakeError("Unsupported or missing X-ray view position")
+        if modality == "DX" and str(getattr(ds, "PresentationIntentType", "")) != "FOR PRESENTATION":
+            raise IntakeError("Digital X-ray requires FOR PRESENTATION images")
+        item.update(view=view)
     else:
         view = str(getattr(ds, "ViewPosition", "")).upper()
         side = str(getattr(ds, "ImageLaterality", "")).upper()
@@ -199,6 +213,10 @@ def _validate_series(items: list[dict], task: TaskConfig) -> dict:
             raise IntakeError("Inconsistent pixel spacing within series")
     result = {"instance_count": len(items), "rows": first["rows"], "columns": first["columns"],
               "pixel_spacing_mm": first["spacing"]}
+    if task.modalities & XRAY_MODALITIES:
+        result["views"] = sorted(x["view"] for x in items)
+        result["projections"] = {x["sop_uid"]: x["view"] for x in items}
+        return result
     if task.modality == "MG":
         views = {(x["laterality"], x["view"]) for x in items}
         if len(views) != len(items):
@@ -272,6 +290,14 @@ def inspect_archive(archive_bytes: bytes, manifest: dict) -> dict:
         views = {(x["laterality"], x["view"]) for series in groups.values() for x in series}
         if views != task.required_views or sum(len(x) for x in groups.values()) != 4:
             raise IntakeError("Incomplete screening mammography: L/R CC and MLO required")
-    return {"task": task.name, "modality": task.modality, "study_uid": manifest["study_uid"],
+    modalities = {x["modality"] for series in groups.values() for x in series}
+    if len(modalities) != 1:
+        raise IntakeError("Mixed modalities in one study")
+    if task.modalities & XRAY_MODALITIES:
+        views = [x["view"] for series in groups.values() for x in series]
+        if (sum(v in XRAY_FRONTAL for v in views) != 1 or sum(v in XRAY_LATERAL for v in views) > 1
+                or len(views) > 2):
+            raise IntakeError("Chest X-ray requires one PA or AP view; one lateral view is optional")
+    return {"task": task.name, "modality": modalities.pop(), "study_uid": manifest["study_uid"],
             "protocol_name": next(iter(protocols)), "anatomy": next(iter(anatomies)),
             "series": summaries, "instance_count": len(seen)}

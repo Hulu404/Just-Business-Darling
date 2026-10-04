@@ -39,7 +39,7 @@ INTENTIONAL = [
     "подпись под названием в боковой панели: «Демо-стенд» (маска .brand small)",
     "«Карта сервисов»: строки состояния сервисов и пометки «демо-модуль» (экран не сравнивается)",
     "имена из сессии: в журнале и новых записях вместо текста прототипа (на стартовых экранах совпадают)",
-    "экраны снимков работают на сервисе снимков: настоящие срезы вместо схем, загрузка ZIP с DICOM, без рентгена (не сравниваются)",
+    "экраны снимков работают на сервисе снимков: настоящие срезы вместо схем, загрузка ZIP с DICOM (не сравниваются)",
     "создание маршрута выключено до задания 07",
     "«Партнёры», «Документы» и кабинет клиники-партнёра работают на сервисе клиники: без выдуманных чисел (не сравниваются)",
 ]
@@ -188,8 +188,8 @@ def check_imaging(browser) -> list[str]:
     patient.goto(APP + "/#/patient/imaging")
     wait_ready(patient)
     patient.click("[data-action=uploadOpen]")
-    if "Рентген" in patient.inner_text("#upKind"):
-        failures.append("в окне загрузки остался рентген")
+    if "Рентгенография" not in patient.inner_text("#upKind"):
+        failures.append("в окне загрузки нет рентгенографии")
     patient.click("[data-action=uploadKit]")
     patient.wait_for_selector("[data-action=uploadKitSend]")
     patient.set_input_files("#upFile", str(archive))
