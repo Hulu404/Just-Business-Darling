@@ -279,7 +279,7 @@ class StaticTests(GatewayTestCase):
         self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
         self.assertIn("МедМаршрут".encode("utf-8"), body)
-        status, headers, _ = self.call("GET", "/assets/js/boot.js")
+        status, headers, _ = self.call("GET", "/assets/js/main.js")
         self.assertEqual(status, 200)
         self.assertTrue(headers["Content-Type"].startswith("text/javascript"))
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
@@ -289,6 +289,23 @@ class StaticTests(GatewayTestCase):
                      "/assets/js/../../test_gateway.py", "/assets/..\\service.py", "/assets/C:/Windows/win.ini",
                      "/assets/index.txt", "/service.py", "/assets/"):
             self.assertEqual(self.call("GET", path)[0], 404, path)
+
+    def test_nested_modules_and_styles(self):
+        status, headers, _ = self.call("GET", "/assets/js/pages/patient.js")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("text/javascript"))
+        status, headers, _ = self.call("GET", "/assets/styles.css")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("text/css"))
+
+    def test_web_has_no_storage_external_urls_or_inline_handlers(self):
+        for path in WEB_DIR.rglob("*"):
+            if not path.is_file():
+                continue
+            content = path.read_text(encoding="utf-8")
+            self.assertNotRegex(content, r"localStorage|sessionStorage", path.name)
+            self.assertNotRegex(content, r"https?://|(?<![:\w])//[a-z0-9-]+\.[a-z]{2,}", path.name)
+            self.assertNotRegex(content, r"\son[a-z]+\s*=\s*['\"]", path.name)
 
     def test_html_has_no_inline_scripts(self):
         html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
@@ -300,7 +317,7 @@ class SecretTests(GatewayTestCase):
     def test_no_secret_in_responses_or_web_files(self):
         self.call("GET", "/api/health")
         self.call("GET", "/")
-        self.call("GET", "/assets/js/boot.js")
+        self.call("GET", "/assets/js/main.js")
         for role in ("patient", "staff", "doctor", "partner"):
             self.login(role)
             self.call("GET", "/api/session", role=role)

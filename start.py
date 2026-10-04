@@ -205,14 +205,18 @@ def main() -> int:
     parser.add_argument("--keep", action="store_true", help="не очищать папку состояния; наполнение при этом не запускается")
     parser.add_argument("--no-seed", action="store_true", help="не наполнять стенд учебными случаями")
     parser.add_argument("--smoke", action="store_true", help="чистый стенд, наполнение, смоук-проверка, остановка")
+    parser.add_argument("--web-check", action="store_true",
+                        help="чистый стенд, наполнение, проверки в браузере (Playwright), остановка")
     parser.add_argument("--image", choices=("demo", "real"), default="demo",
                         help="demo — сценарный backend снимков; real — настоящий сервис снимков (MODEL_CONFIG, если задан)")
     parser.add_argument("--print-secrets", action="store_true", help="напечатать секреты для ручной работы с API")
     args = parser.parse_args()
     if hasattr(signal, "SIGBREAK"):
         signal.signal(signal.SIGBREAK, signal.default_int_handler)  # Ctrl+Break stops the stand like Ctrl+C
-    if args.smoke and (args.keep or args.image == "real"):
-        parser.error("--smoke проверяет чистый стенд со сценарным backend: не сочетается с --keep и --image real")
+    checking = args.smoke or args.web_check
+    if checking and (args.keep or args.image == "real" or args.no_seed):
+        parser.error("--smoke и --web-check проверяют чистый наполненный стенд со сценарным backend: "
+                     "не сочетаются с --keep, --no-seed и --image real")
 
     busy = [s for s in SERVICES if port_busy(s["port"])]
     if busy:
@@ -249,11 +253,17 @@ def main() -> int:
             say("Наполняю стенд учебными случаями…")
             if stand.run_tool("seed.py") != 0:
                 say("Наполнение не прошло: подробности выше.")
-                if args.smoke:
+                if checking:
                     return 1
-        if args.smoke:
-            say("Запускаю смоук-проверку…")
-            return stand.run_tool("smoke.py")
+        if checking:
+            code = 0
+            if args.smoke:
+                say("Запускаю смоук-проверку…")
+                code = max(code, stand.run_tool("smoke.py"))
+            if args.web_check:
+                say("Запускаю проверки в браузере…")
+                code = max(code, stand.run_tool("web_check.py"))
+            return code
         say()
         for service in SERVICES:
             for page in service["pages"]:

@@ -17,6 +17,7 @@ python start.py
 |---|---|
 | `python start.py` | чистый стенд, наполнение, работа до Ctrl+C |
 | `python start.py --smoke` | чистый стенд, наполнение, сквозная проверка, остановка; код завершения 0 — всё прошло |
+| `python start.py --web-check` | чистый стенд, наполнение, проверки в браузере (Playwright), остановка |
 | `python start.py --no-seed` | стенд без учебных случаев |
 | `python start.py --keep` | не очищать папку состояния; наполнение не запускается |
 | `python start.py --state-dir D:\stand` | другая папка состояния (по умолчанию `%TEMP%\medmarshrut-stand`) |
@@ -50,6 +51,7 @@ python start.py
 | `studies.json` | реестр наполнения: идентификатор задания сервиса снимков → `patient_ref`, название исследования |
 | `path.sqlite3`, `clinic.sqlite3`, `gateway.sqlite3` | базы сервисов пути и клиники и шлюза |
 | `logs/` | stdout и stderr сервисов |
+| `web-check/` | снимки экранов прототипа и продукта из `--web-check` |
 
 Архивы `upload-*` в `kit/` не использует наполнение: их можно загружать из интерфейса. Архивы `smoke-*` использует смоук-проверка.
 
@@ -85,5 +87,6 @@ python start.py --print-secrets
 | `image_demo_runner.py` | сервис снимков со сценарным backend |
 | `seed.py` | наполнение стенда |
 | `smoke.py` | сквозная проверка на своём пациенте: десять шагов по сервисам и одиннадцатый через шлюз |
+| `web_check.py` | проверки веб-приложения в браузере: экраны, ширины, сценарий, два окна, сравнение с прототипом. Нужен Playwright: `python -m pip install playwright` и `python -m playwright install chromium` |
 | `stand_api.py` | HTTP-клиент для `seed.py` и `smoke.py` |
 | `rules.demo.json`, `network.demo.json`, `people.demo.json`, `conclusions.demo.json` | данные стенда |
