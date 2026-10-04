@@ -4,6 +4,7 @@ import { state, sessions } from './state.js';
 import { badge, btn, closeModal, errorNote, go, loadingCards, modalHead, navBtn, openModal, safe, toast } from './ui.js';
 import { render } from './shell.js';
 import { demoSource, manualStudiesBlock } from './imaging-ui.js';
+import { caseClinicActions, caseClinicBlocks } from './clinic-ui.js';
 
 const routePages = new Set(['home', 'plan', 'appointments', 'inbox', 'case', 'scheduling']);
 export const isPathPage = () => routePages.has(state.page) && (state.role === 'patient' || state.role === 'staff' || state.role === 'doctor');
@@ -139,17 +140,17 @@ function staffActions(e){
     s?.status === 'confirmed' || s?.status === 'attended' ? btn('Итог приёма', 'pathOutcomeOpen', '', {id:e.id, step:s.id}) : '';
   if (state.role !== 'staff') return '';
   if (!s) return e.steps.every(x => ['completed','superseded'].includes(x.status)) && e.status === 'active' ?
-    btn('Закрыть маршрут', 'pathStaffEpisodeOpen', '', {id:e.id, action:'close'}) : '';
+    btn('Закрыть маршрут', 'pathStaffEpisodeOpen', '', {id:e.id, act:'close'}) : '';
   const key = keyOf(e,s);
-  if (e.status === 'paused') return btn('Передать врачу для нового плана', 'pathStaffEpisodeOpen', 'secondary', {id:e.id, action:'stop'});
+  if (e.status === 'paused') return btn('Передать врачу для нового плана', 'pathStaffEpisodeOpen', 'secondary', {id:e.id, act:'stop'});
   if (s.kind === 'care_coordination' && s.status === 'open') return btn('Завершить организационный шаг', 'pathStaffComplete', '', {key});
   if (s.status === 'open') return btn('Предложить время', 'pathStaffSlots', '', {key, mode:'offer'}) + btn('Записать по звонку', 'pathStaffSlots', 'secondary', {key, mode:'confirm'});
-  if (s.status === 'offered') return btn('Подтвердить по звонку', 'pathStaffAct', '', {key, action:'confirm'}) +
-    btn('Отменить предложение', 'pathStaffAct', 'secondary', {key, action:'cancel'}) +
-    btn('Нет связи', 'pathStaffAct', 'ghost', {key, action:'lost_contact'});
-  if (s.status === 'confirmed') return btn('Визит состоялся', 'pathStaffAct', '', {key, action:'attend'}) +
-    btn('Отменить запись', 'pathStaffAct', 'secondary', {key, action:'cancel'}) +
-    btn('Пациент отказался', 'pathStaffAct', 'ghost', {key, action:'refuse'});
+  if (s.status === 'offered') return btn('Подтвердить по звонку', 'pathStaffAct', '', {key, act:'confirm'}) +
+    btn('Отменить предложение', 'pathStaffAct', 'secondary', {key, act:'cancel'}) +
+    btn('Нет связи', 'pathStaffAct', 'ghost', {key, act:'lost_contact'});
+  if (s.status === 'confirmed') return btn('Визит состоялся', 'pathStaffAct', '', {key, act:'attend'}) +
+    btn('Отменить запись', 'pathStaffAct', 'secondary', {key, act:'cancel'}) +
+    btn('Пациент отказался', 'pathStaffAct', 'ghost', {key, act:'refuse'});
   return '';
 }
 
@@ -161,8 +162,8 @@ export function pathCase(){
   const report = e.source_report || {};
   return intro + `<div class="twocol"><div class="stack"><div class="panel"><h3>Заключение по исследованию</h3><p>${safe(report.conclusion)}</p>
       <dl class="kv"><dt>Исследование</dt><dd>${safe(report.study_type)}</dd><dt>Область</dt><dd>${safe(report.anatomy)}</dd><dt>Протокол</dt><dd>${safe(report.protocol_name)}</dd><dt>Код находки</dt><dd>${safe(report.finding_code)}</dd><dt>Подтвердил</dt><dd>${safe(report.physician_id)} · ${safe(fmt(report.confirmed_at))}</dd><dt>Источник черновика</dt><dd>${safe(report.source_model)}</dd></dl>${demoSource(report.source_model)}</div>
-      <div class="panel"><h3>Рекомендация следующего шага</h3>${e.reason ? `<div class="note warn">${safe(e.reason)}</div>` : ''}<div class="tlgroup">План</div>${e.steps.map(s => `<div class="rowline"><div><strong>${stepTitle(s)}</strong><div class="meta">${safe(s.decision_source)} · ${safe(fmt(s.due_at))}</div></div>${badge(statusName(s.status), tone(s.status))}</div>`).join('') || '<p>План уточняет врач.</p>'}</div></div>
-      <div class="stack"><div class="panel"><h3>Что сделать сейчас</h3><p>${safe(staffReason(e))}</p><div class="actions">${staffActions(e)}</div></div>
+      <div class="panel"><h3>Рекомендация следующего шага</h3>${e.reason ? `<div class="note warn">${safe(e.reason)}</div>` : ''}<div class="tlgroup">План</div>${e.steps.map(s => `<div class="rowline"><div><strong>${stepTitle(s)}</strong><div class="meta">${safe(s.decision_source)} · ${safe(fmt(s.due_at))}</div></div>${badge(statusName(s.status), tone(s.status))}</div>`).join('') || '<p>План уточняет врач.</p>'}</div>${caseClinicBlocks(e)}</div>
+      <div class="stack"><div class="panel"><h3>Что сделать сейчас</h3><p>${safe(staffReason(e))}</p><div class="actions">${staffActions(e)}</div>${caseClinicActions(e)}</div>
       ${path.requests.filter(r => r.episode_id === e.id).length ? `<div class="panel"><h3>Обращения пациента</h3>${path.requests.filter(r => r.episode_id === e.id).map(r => `<div class="rowline"><div><strong>${safe(r.intent)}</strong><div class="meta">${safe(fmt(r.created_at))}</div><p>${safe(r.body)}</p></div></div>`).join('')}</div>` : ''}
       <div class="panel"><h3>Журнал</h3><div class="log">${e.audit_events.map(a => `<div><time>${safe(fmt(a.occurred_at))}</time><span><b>${safe(a.actor)}</b> ${safe(a.event_type)}</span></div>`).join('')}</div></div></div></div>`;
 }
@@ -188,7 +189,7 @@ export function installPathActions(actions){
   actions.pathBook = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/patient/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/book`, {slot_id:d.slot}, 'Запись подтверждена'); };
   actions.pathConfirm = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/patient/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/confirm`, {}, 'Запись подтверждена'); };
   actions.pathAsk = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/patient/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/ask`, {intent:d.intent}, 'Координатор увидит ваше обращение'); };
-  actions.pathStaffAct = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/staff/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/${encodeURIComponent(d.action)}`, {}, 'Статус обновлён'); };
+  actions.pathStaffAct = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/staff/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/${encodeURIComponent(d.act)}`, {}, 'Статус обновлён'); };
   actions.pathStaffSlots = async d => {
     const [e,s] = byKey(d.key); if (!e || !s) return;
     openModal(modalHead(d.mode === 'offer' ? 'Предложить время' : 'Записать по звонку', stepTitle(s)) + loadingCards(2));
@@ -199,9 +200,9 @@ export function installPathActions(actions){
   };
   actions.pathStaffPick = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/staff/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/${d.mode}`, {slot_id:d.slot}, d.mode === 'offer' ? 'Предложение отправлено' : 'Запись подтверждена'); };
   actions.pathStaffComplete = d => { const [e,s] = byKey(d.key); if (e && s) mutate(`/api/staff/episodes/${encodeURIComponent(e.id)}/steps/${encodeURIComponent(s.id)}/complete`, {}, 'Шаг завершён'); };
-  actions.pathStaffEpisodeOpen = d => openModal(`${modalHead('Обращение', d.action === 'close' ? 'Закрыть маршрут' : 'Остановить маршрут')}
-    <div class="field"><label for="pathEpisodeReason">${d.action === 'close' ? 'Итог' : 'Причина'}</label><textarea id="pathEpisodeReason" maxlength="500"></textarea></div>
-    <div class="actions">${btn('Подтвердить', 'pathStaffEpisodeSave', '', d)}${btn('Отмена','close','secondary')}</div>`);
+  actions.pathStaffEpisodeOpen = d => openModal(`${modalHead('Обращение', d.act === 'close' ? 'Закрыть маршрут' : 'Остановить маршрут')}
+    <div class="field"><label for="pathEpisodeReason">${d.act === 'close' ? 'Итог' : 'Причина'}</label><textarea id="pathEpisodeReason" maxlength="500"></textarea></div>
+    <div class="actions">${btn('Подтвердить', 'pathStaffEpisodeSave', '', {id:d.id, act:d.act})}${btn('Отмена','close','secondary')}</div>`);
   actions.pathStaffEpisodeSave = d => { const value = document.querySelector('#pathEpisodeReason')?.value.trim(); if (!value) return toast('Укажите итог или причину.');
-    mutate(`/api/staff/episodes/${encodeURIComponent(d.id)}/${d.action}`, {[d.action === 'close' ? 'outcome' : 'reason']:value}, 'Маршрут обновлён'); };
+    mutate(`/api/staff/episodes/${encodeURIComponent(d.id)}/${d.act}`, {[d.act === 'close' ? 'outcome' : 'reason']:value}, 'Маршрут обновлён'); };
 }

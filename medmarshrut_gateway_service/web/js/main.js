@@ -1,32 +1,47 @@
 /* Запуск: адрес окна задаёт роль и экран (#/staff/case), сессия роли создаётся в шлюзе, состояние сервисов — из /api/health */
-import { createSession, getHealth } from './api.js';
+import { createSession, getHealth, sessionExtras } from './api.js';
 import { ACTIONS, PAGES } from './actions.js';
-import { render, renderBanner } from './shell.js';
+import { render, renderBanner, renderShell } from './shell.js';
 import { freshState, health, hooks, sessions, setState, state, ui } from './state.js';
 import { installPathActions, isPathPage, pathAppointments, pathCase, pathHome, pathInbox, pathPlan, pathScheduling, refreshPath } from './path-ui.js';
 import { installPathExtra, pathAnalytics, pathDoctor, pathRules, refreshPathExtra } from './path-extra.js';
 import { imagingPage, installImagingActions, isImagingListPage, readingPage, refreshImaging, studyPage } from './imaging-ui.js';
+import { analyticsClinicBlock, documentsReferrals, incomingPage, installClinicActions, isClinicPage, partnersPage, referralPage, refreshClinic } from './clinic-ui.js';
+import { documents } from './pages/patient.js';
 
-const ROLES = ['patient', 'staff', 'doctor'];
+const ROLES = ['patient', 'staff', 'doctor', 'partner'];
+const DEFAULT_PARTNER = 'clinic-partner-1';
 const HEALTH_EVERY = 15000;
 Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointments,
                       inbox:pathInbox, case:pathCase, scheduling:pathScheduling,
                       doctor:pathDoctor, rules:pathRules, analytics:pathAnalytics,
-                      imaging:imagingPage, reading:readingPage, study:studyPage});
+                      imaging:imagingPage, reading:readingPage, study:studyPage,
+                      partners:partnersPage, incoming:incomingPage, referral:referralPage,
+                      documents:() => documents() + documentsReferrals(),
+                      analytics:() => pathAnalytics() + analyticsClinicBlock()});
 installPathActions(ACTIONS);
 installPathExtra(ACTIONS);
 installImagingActions(ACTIONS);
-const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); };
+installClinicActions(ACTIONS);
+const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); };
 const sessionRequests = {};
 
+/* Окно клиники-партнёра хранит клинику в адресе: #/partner/incoming?clinic=clinic-partner-2 */
 function parseHash(){
-  const m = /^#\/([a-z]+)\/([A-Za-z]+)$/.exec(location.hash);
-  return m && ROLES.includes(m[1]) && Object.prototype.hasOwnProperty.call(PAGES, m[2]) ? {role:m[1], page:m[2]} : null;
+  const m = /^#\/([a-z]+)\/([A-Za-z]+)(?:\?clinic=([a-z0-9-]+))?$/.exec(location.hash);
+  if (!m || !ROLES.includes(m[1]) || !Object.prototype.hasOwnProperty.call(PAGES, m[2])) return null;
+  return m[1] === 'partner' ? {role:m[1], page:m[2], partnerClinic:m[3] || DEFAULT_PARTNER} : {role:m[1], page:m[2]};
 }
-const hashOf = () => `#/${state.role}/${state.page}`;
+const hashOf = () => `#/${state.role}/${state.page}${state.role === 'partner' ? '?clinic=' + (state.partnerClinic || DEFAULT_PARTNER) : ''}`;
 
 /* Сессия роли окна. Пока её нет, shell показывает заглушку; при ошибке — блок с «Повторить» */
 async function ensureSession(role){
+  if (role === 'partner'){
+    state.partnerClinic = state.partnerClinic || DEFAULT_PARTNER;
+    sessionExtras.partner = {clinic_id:state.partnerClinic};
+    /* Кука у роли партнёра одна: окно другой клиники открывает свою сессию заново */
+    if (sessions.partner?.status === 'ok' && sessions.partner.data?.clinic_id !== state.partnerClinic) delete sessions.partner;
+  }
   const current = sessions[role];
   if (current?.status === 'ok') return;
   if (current?.status === 'loading') return sessionRequests[role];
@@ -46,7 +61,7 @@ async function ensureSession(role){
 function applyRoute(){
   const route = parseHash();
   if (!route) history.replaceState(null, '', hashOf());
-  else if (route.role !== state.role || route.page !== state.page){
+  else if (route.role !== state.role || route.page !== state.page || (route.partnerClinic || null) !== (state.role === 'partner' ? state.partnerClinic : null)){
     Object.assign(state, route);
     ui.mobileOpen = false; ui.modal = null;
   }
@@ -72,6 +87,7 @@ async function refreshHealth(){
   if (snapshot === lastHealth) return;
   lastHealth = snapshot;
   renderBanner();
+  renderShell();  // в списке ролей — клиники-партнёры из /api/health
   if (state.page === 'services' && !ui.modal) render();
 }
 
@@ -90,3 +106,4 @@ setInterval(refreshHealth, HEALTH_EVERY);
 setInterval(() => { if (isPathPage()) refreshPath(); }, HEALTH_EVERY);
 setInterval(refreshPathExtra, HEALTH_EVERY);
 setInterval(() => { if (isImagingListPage()) refreshImaging(); }, HEALTH_EVERY);
+setInterval(() => { if (isClinicPage() && state.page !== 'referral') refreshClinic(); }, HEALTH_EVERY);

@@ -1,4 +1,4 @@
-import { CATS, DEMO, PARTNERS, PHARMACIES, PRODUCTS, RX_STOCK, scenarios, slotsFor } from '../demo-data.js';
+import { CATS, DEMO, PHARMACIES, PRODUCTS, RX_STOCK, scenarios, slotsFor } from '../demo-data.js';
 import { addLog, byKey, currentStep, ep, mkStep, myEpisodes, refKey, slotFull, slotLine, studyOf, title, whereBadge, wherePartner } from '../domain.js';
 import { icon } from '../icons.js';
 import { patientName, state } from '../state.js';
@@ -67,7 +67,7 @@ export function home(){
 export function visitDay(s){
   if (!s.slot) return '';
   if (s.slot.format === 'Онлайн') return '<strong>В день визита.</strong> Ссылка на видеоприём придёт сюда и в SMS за 15 минут до начала.';
-  if (s.slot.partner) return `<strong>В день визита.</strong> ${safe(PARTNERS[s.slot.partner].name)} — партнёр клиники. Направление и заключение уже там, с собой нужен только паспорт. Результат вернётся в ваш план.`;
+  if (s.slot.partner) return `<strong>В день визита.</strong> ${safe(s.slot.place)} — партнёр клиники. Направление и заключение уже там, с собой нужен только паспорт. Результат вернётся в ваш план.`;
   return `<strong>В день визита.</strong> ${safe(s.slot.place)}: регистратура на первом этаже, затем ${ROOMS[s.service] || 'кабинет укажем в напоминании'}. Приходите за 10 минут, с собой паспорт и полис.${s.service === 'labs' ? ' Как подготовиться к анализам, напишем в напоминании.' : ''}`;
 }
 export function planStep(e, s, isCur, isLast){
@@ -140,7 +140,7 @@ export function slotAskModal(key, slotId, mode){
   const x = slotsFor(s.service).find(z => z.id === slotId);
   const heads = {patient:'Подтверждение записи', offer:'Предложить время пациенту', staff:'Записать по звонку'};
   openModal(`${modalHead(heads[mode], `${safe(x.date)}, ${safe(x.time)}`)}<p><strong style="color:var(--ink)">${safe(title(s))}</strong><br>${safe(x.who)}<br>${safe(x.place)} · ${safe(x.format)} · ${safe(x.price)}</p>
-    ${x.partner ? `<div class="note" style="margin-bottom:12px"><strong>${safe(PARTNERS[x.partner].name)}</strong> — партнёр клиники. ${mode === 'patient' ? 'Мы передадим туда направление и заключение по снимку, а результат вернётся в ваш план.' : 'Партнёр получит направление и заключение, результат вернётся в эпизод.'}</div>` : ''}
+    ${x.partner ? `<div class="note" style="margin-bottom:12px"><strong>${safe(x.place)}</strong> — партнёр клиники. ${mode === 'patient' ? 'Мы передадим туда направление и заключение по снимку, а результат вернётся в ваш план.' : 'Партнёр получит направление и заключение, результат вернётся в эпизод.'}</div>` : ''}
     <div class="note">${mode === 'offer' ? 'Пациент получит сообщение с кнопкой подтверждения. В демо оно появится в режиме пациента.' : 'Это демонстрационная запись. В расписание клиники она не попадает.'}</div>
     <div class="actions">${btn(mode === 'offer' ? 'Отправить предложение' : 'Подтвердить', 'slotConfirm', '', {key, slot:slotId, mode})}${btn('Назад', 'close', 'secondary')}</div>`);
 }

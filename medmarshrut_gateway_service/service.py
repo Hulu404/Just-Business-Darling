@@ -179,6 +179,19 @@ class Gateway:
             ("GET", "/api/doctor/studies/{id}/images/{image}"): self.doctor_image,
             ("POST", "/api/doctor/studies/{id}/confirm"): self.doctor_confirm,
             ("GET", "/api/staff/studies/manual"): self.staff_manual_studies,
+            ("GET", "/api/staff/patients"): self.staff_patients,
+            ("GET", "/api/staff/patients/{ref}/card"): self.staff_patient_card,
+            ("POST", "/api/staff/patients/{ref}/anamnesis"): self.staff_anamnesis,
+            ("GET", "/api/staff/episodes/{id}/route-candidates"): self.staff_route_candidates,
+            ("POST", "/api/staff/episodes/{id}/steps/{step}/referral"): self.staff_referral,
+            ("GET", "/api/staff/referrals"): self.staff_referrals,
+            ("POST", "/api/staff/referrals/{id}/cancel"): self.staff_referral_cancel,
+            ("GET", "/api/staff/network"): self.staff_network,
+            ("GET", "/api/partner/queue"): self.partner_queue,
+            ("GET", "/api/partner/referrals"): self.partner_referrals,
+            ("GET", "/api/partner/patients/{id}/card"): self.partner_card,
+            ("POST", "/api/partner/referrals/{id}/{action}"): self.partner_action,
+            ("GET", "/api/patient/documents"): self.patient_documents,
         }
         # Routes whose body is a ZIP archive, not JSON: type and Content-Length are checked before reading.
         self.raw_routes: set[tuple[str, str]] = {("POST", "/api/patient/studies"), ("POST", "/api/staff/studies")}
@@ -216,14 +229,28 @@ class Gateway:
             ("GET", "/api/doctor/studies/{id}/images/{image}"): {"doctor"},
             ("POST", "/api/doctor/studies/{id}/confirm"): {"doctor"},
             ("GET", "/api/staff/studies/manual"): {"staff", "doctor"},
+            ("GET", "/api/staff/patients"): {"staff", "doctor"},
+            ("GET", "/api/staff/patients/{ref}/card"): {"staff", "doctor"},
+            ("POST", "/api/staff/patients/{ref}/anamnesis"): {"staff", "doctor"},
+            ("GET", "/api/staff/episodes/{id}/route-candidates"): {"staff", "doctor"},
+            ("POST", "/api/staff/episodes/{id}/steps/{step}/referral"): {"staff"},
+            ("GET", "/api/staff/referrals"): {"staff"},
+            ("POST", "/api/staff/referrals/{id}/cancel"): {"staff"},
+            ("GET", "/api/staff/network"): {"staff"},
+            ("GET", "/api/partner/queue"): {"partner"},
+            ("GET", "/api/partner/referrals"): {"partner"},
+            ("GET", "/api/partner/patients/{id}/card"): {"partner"},
+            ("POST", "/api/partner/referrals/{id}/{action}"): {"partner"},
+            ("GET", "/api/patient/documents"): {"patient"},
         }
 
     def allowed_hosts(self) -> set[str]:
         return {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
 
     def match(self, method: str, path: str) -> tuple[tuple[str, str], dict[str, str]] | None:
+        """The most specific route wins: a literal segment beats a {parameter} (…/steps/{step}/referral)."""
         segments = path.strip("/").split("/")
-        for key in self.routes:
+        for key in sorted(self.routes, key=lambda k: k[1].count("{")):
             if key[0] != method:
                 continue
             pattern = key[1].strip("/").split("/")
@@ -243,7 +270,18 @@ class Gateway:
 
     def health(self, ctx: Context) -> tuple[int, dict]:
         return 200, {"gateway": "ok", "auth": "demo-roles", "imaging_mode": self.config.imaging_mode,
-                     "services": self.upstream.health_all()}
+                     "services": self.upstream.health_all(), "partner_clinics": self._partner_clinics()}
+
+    def _partner_clinics(self) -> list[dict]:
+        """Partner clinics a window can open: a staff token, a demo person, a name from the clinic network."""
+        if not getattr(self, "_clinic_titles", None):
+            try:
+                body = self.upstream.json("clinic", "GET", "/v1/clinics", auth=("clinic_staff", self.config.home_clinic))
+                self._clinic_titles = {c["id"]: c["name"] for c in body.get("clinics", [])}
+            except GatewayError:
+                return []
+        return [{"clinic_id": clinic, "name": self._clinic_titles[clinic]} for clinic in sorted(self.upstream.clinics_with_staff())
+                if clinic != self.config.home_clinic and clinic in self._clinic_titles and self.people.partner(clinic)]
 
     def session_create(self, ctx: Context) -> tuple[int, dict]:
         body = ctx.body
@@ -429,6 +467,8 @@ class Gateway:
             raise GatewayError(404, "not_found", "Такого действия нет.")
         raw = self._one_episode(ctx.params["id"])
         step = self._step(raw, ctx.params["step"])
+        if action == "confirm" and "partner_time" in ctx.body:
+            return self._partner_booking(ctx, raw, step)
         body = {"actor": ctx.session.actor, "evidence": "Запись по звонку" if action in {"offer", "confirm"}
                 else "Координатор отметил изменение записи"}
         reservation = None
@@ -875,6 +915,202 @@ class Gateway:
             elif public.get("status") == "confirmed" and public.get("routing_status") == "failed":
                 not_routed.append({**entry, "warning": NOT_ROUTED})
         return 200, {"manual": manual, "not_routed": not_routed}
+
+    # ---------- clinic: cards, network, referrals ----------
+
+    def _own_clinic(self, ctx: Context) -> tuple[str, str]:
+        """The token is chosen by the session's clinic; a staff session acts only for the home clinic."""
+        clinic = ctx.session.clinic_id
+        if ctx.role == "partner":
+            if not clinic or clinic == self.config.home_clinic:
+                raise GatewayError(403, "forbidden", "Сессия партнёра не привязана к клинике-партнёру. Выберите роль заново.")
+        elif clinic != self.config.home_clinic:
+            raise GatewayError(403, "forbidden", "Сессия не привязана к своей клинике. Выберите роль заново.")
+        return "clinic_staff", clinic
+
+    def _clinic(self, ctx: Context, method: str, route: str, body: dict | None = None) -> dict:
+        return self.upstream.json("clinic", method, route, body=body, auth=self._own_clinic(ctx))
+
+    def _clinic_names(self, ctx: Context) -> dict[str, str]:
+        return {c["id"]: c["name"] for c in self._clinic(ctx, "GET", "/v1/clinics").get("clinics", [])}
+
+    def _patient_id(self, ctx: Context, ref: str) -> str:
+        ref = patient_ref(ref)
+        found = next((p for p in self._clinic(ctx, "GET", "/v1/patients?limit=500").get("patients", [])
+                      if p.get("patient_ref") == ref), None)
+        if found is None:
+            raise GatewayError(404, "not_found", "Пациент не найден в карте клиники. Проверьте псевдоним.")
+        return found["id"]
+
+    def staff_patients(self, ctx: Context) -> tuple[int, dict]:
+        raw_limit = ctx.query.get("limit", "100")
+        if not raw_limit.isdecimal() or not 1 <= int(raw_limit) <= 500:
+            raise GatewayError(400, "invalid_input", "Число пациентов в списке: целое от 1 до 500.")
+        route = f"/v1/patients?limit={int(raw_limit)}"
+        if ctx.query.get("status"):
+            if ctx.query["status"] not in {"active", "archived", "transferred", "deceased"}:
+                raise GatewayError(400, "invalid_input", "Статус карты: active, archived, transferred или deceased.")
+            route += "&status=" + ctx.query["status"]
+        return 200, self._clinic(ctx, "GET", route)
+
+    def staff_patient_card(self, ctx: Context) -> tuple[int, dict]:
+        patient_id = self._patient_id(ctx, ctx.params["ref"])
+        return 200, self._clinic(ctx, "GET", f"/v1/patients/{quote(patient_id, safe='')}/card")
+
+    ANAMNESIS_KINDS = {"diagnosis", "allergy", "medication", "surgery", "family_history", "risk_factor", "note",
+                       "measurement", "lab"}
+
+    def staff_anamnesis(self, ctx: Context) -> tuple[int, dict]:
+        kind = ctx.body.get("kind")
+        if kind not in self.ANAMNESIS_KINDS:
+            raise GatewayError(400, "invalid_input", "Выберите вид записи анамнеза.")
+        shareable = ctx.body.get("shareable", False)
+        if type(shareable) is not bool:
+            raise GatewayError(400, "invalid_input", "Отметьте, показывать ли запись партнёрам.")
+        patient_id = self._patient_id(ctx, ctx.params["ref"])
+        # author_id, author_role and clinic_id come from the session, never from the request body.
+        body = {"kind": kind, "code": text(ctx.body.get("code"), "code", 64, required=False),
+                "text": text(ctx.body.get("text"), "text", 4000), "shareable": shareable, "recorded_at": None,
+                "author_id": ctx.session.actor, "author_role": "physician" if ctx.role == "doctor" else "coordinator",
+                "clinic_id": ctx.session.clinic_id}
+        return 201, self._clinic(ctx, "POST", f"/v1/patients/{quote(patient_id, safe='')}/anamnesis", body)
+
+    CANDIDATE_REASONS = {None: "", "unknown_patient_ref": "Пациент не найден в карте клиники",
+                         "no_clinic_with_capability": "Ни своя клиника, ни партнёры не выполняют такой шаг"}
+
+    def staff_route_candidates(self, ctx: Context) -> tuple[int, dict]:
+        self._own_clinic(ctx)
+        report = self._one_episode(ctx.params["id"]).get("source_report") or {}
+        ref = report.get("patient_ref")
+        if not ref:
+            return 200, {"candidates": [], "reason": "unknown_patient_ref", "reason_text": self.CANDIDATE_REASONS["unknown_patient_ref"]}
+        scope = {key: report.get(key) for key in ("study_type", "anatomy", "protocol_name", "finding_code")}
+        if not all(isinstance(v, str) and v for v in scope.values()):
+            raise GatewayError(409, "invalid_scope", "В заключении не хватает сведений об исследовании: кандидатов не подобрать.")
+        result = self.upstream.json("clinic", "POST", "/v1/route-candidates", body={"patient_ref": ref, "scope": scope},
+                                    auth="clinic_signed")
+        reason = result.get("reason")
+        result["reason_text"] = self.CANDIDATE_REASONS.get(reason, "Карта пациента закрыта" if str(reason).startswith("patient_") else reason)
+        return 200, result
+
+    def _referrals(self, ctx: Context) -> list[dict]:
+        return self._clinic(ctx, "GET", "/v1/referrals").get("referrals", [])
+
+    def staff_referral(self, ctx: Context) -> tuple[int, dict]:
+        clinic = self._own_clinic(ctx)[1]
+        raw = self._one_episode(ctx.params["id"])
+        step = self._step(raw, ctx.params["step"])
+        if step.get("kind") == "manual_review" or step.get("status") in {"completed", "superseded", "closed"}:
+            raise GatewayError(409, "step_unavailable", "Для этого шага направление уже не нужно. Обновите карточку.")
+        ref = (raw.get("source_report") or {}).get("patient_ref")
+        if not ref:
+            raise GatewayError(409, "missing_patient", "В обращении нет пациента. Передайте случай врачу на ручной разбор.")
+        target = text(ctx.body.get("to_clinic_id"), "to_clinic_id", 128)
+        reason = text(ctx.body.get("reason"), "reason", 1000)
+        # A repeat after a failed link write must not create a second referral: reuse the active one.
+        existing = next((r for r in self._referrals(ctx) if r.get("patient_ref") == ref and r.get("from_clinic_id") == clinic
+                         and r.get("to_clinic_id") == target and r.get("status") in {"proposed", "accepted"}), None)
+        if existing is not None:
+            linked = self.data_store().referral_links([existing["id"]]).get(existing["id"])
+            if linked and (linked["episode_id"], linked["step_id"]) != (raw["id"], step["id"]):
+                raise GatewayError(409, "upstream_rejected", "Направление этому партнёру уже есть. Откройте его во вкладке «Направления».")
+            referral, status = existing, 200
+        else:
+            referral = self.upstream.json("clinic", "POST", "/v1/referrals", auth="clinic_signed", ok={201}, body={
+                "patient_ref": ref, "from_clinic_id": clinic, "to_clinic_id": target, "reason": reason,
+                "created_by": ctx.session.actor})
+            status = 201
+        try:
+            link = self.data_store().link_referral(referral["id"], raw["id"], step["id"], ctx.session.actor)
+        except StoreConflict:
+            raise
+        except StoreError:
+            raise GatewayError(503, "link_not_saved", "Направление создано, но связь с шагом не записалась. "
+                               "Нажмите «Направить» ещё раз: второе направление не появится.") from None
+        return status, {"referral": referral, "link": {"episode_id": link["episode_id"], "step_id": link["step_id"]}}
+
+    def staff_referrals(self, ctx: Context) -> tuple[int, dict]:
+        items = self._referrals(ctx)
+        names = self._clinic_names(ctx)
+        links = self.data_store().referral_links([r["id"] for r in items]) if items else {}
+        clinic = ctx.session.clinic_id
+        return 200, {"referrals": [{**r, "direction": "outgoing" if r.get("from_clinic_id") == clinic else "incoming",
+                                    "from_clinic_name": names.get(r.get("from_clinic_id"), r.get("from_clinic_id")),
+                                    "to_clinic_name": names.get(r.get("to_clinic_id"), r.get("to_clinic_id")),
+                                    "link": links.get(r["id"])} for r in items]}
+
+    def staff_referral_cancel(self, ctx: Context) -> tuple[int, dict]:
+        note = text(ctx.body.get("note"), "note", 500, required=False)
+        body = {"actor": ctx.session.actor, **({"note": note} if note else {})}
+        return 200, {"referral": self._clinic(ctx, "POST", f"/v1/referrals/{quote(ctx.params['id'], safe='')}/cancel", body)}
+
+    def staff_network(self, ctx: Context) -> tuple[int, dict]:
+        clinics = self._clinic(ctx, "GET", "/v1/clinics")
+        partners = self._clinic(ctx, "GET", "/v1/partnerships").get("partners", [])
+        metrics = self._clinic(ctx, "GET", "/v1/staff/metrics")
+        counts: dict[str, dict] = {}
+        for r in self._referrals(ctx):
+            if r.get("from_clinic_id") == ctx.session.clinic_id:
+                item = counts.setdefault(r.get("to_clinic_id"), {"sent": 0, "accepted": 0})
+                item["sent"] += 1
+                item["accepted"] += r.get("status") in {"accepted", "completed"}
+        return 200, {"clinics": clinics.get("clinics", []), "network_version": clinics.get("network_version"),
+                     "partners": partners, "metrics": metrics, "referral_counts": counts, "home_clinic_id": ctx.session.clinic_id}
+
+    # Partner screens get exactly what the clinic service returned for the partner's own token.
+
+    def partner_queue(self, ctx: Context) -> tuple[int, dict]:
+        return 200, self._clinic(ctx, "GET", "/v1/staff/queue")
+
+    def partner_referrals(self, ctx: Context) -> tuple[int, dict]:
+        names = self._clinic_names(ctx)
+        return 200, {"referrals": [{**r, "from_clinic_name": names.get(r.get("from_clinic_id"), r.get("from_clinic_id")),
+                                    "to_clinic_name": names.get(r.get("to_clinic_id"), r.get("to_clinic_id"))}
+                                   for r in self._referrals(ctx)], "clinic_id": ctx.session.clinic_id}
+
+    def partner_card(self, ctx: Context) -> tuple[int, dict]:
+        return 200, self._clinic(ctx, "GET", f"/v1/patients/{quote(ctx.params['id'], safe='')}/card")
+
+    def partner_action(self, ctx: Context) -> tuple[int, dict]:
+        action = ctx.params["action"]
+        if action not in {"accept", "reject", "complete"}:
+            raise GatewayError(404, "not_found", "Такого действия нет.")
+        note = text(ctx.body.get("note"), "note", 500, required=False)
+        body = {"actor": ctx.session.actor, **({"note": note} if note else {})}
+        # Completing a referral changes nothing in the path service: the coordinator marks the visit, the doctor the outcome.
+        return 200, {"referral": self._clinic(ctx, "POST", f"/v1/referrals/{quote(ctx.params['id'], safe='')}/{action}", body)}
+
+    def patient_documents(self, ctx: Context) -> tuple[int, dict]:
+        home = ("clinic_staff", self.config.home_clinic)
+        items = self.upstream.json("clinic", "GET", "/v1/referrals", auth=home).get("referrals", [])
+        names = {c["id"]: c["name"] for c in self.upstream.json("clinic", "GET", "/v1/clinics", auth=home).get("clinics", [])}
+        mine = [r for r in items if r.get("patient_ref") == ctx.session.patient_ref]
+        return 200, {"referrals": [{"id": r["id"], "to_clinic_name": names.get(r.get("to_clinic_id"), "Клиника-партнёр"),
+                                    "reason": r.get("reason"), "status": r.get("status"), "created_at": r.get("created_at")}
+                                   for r in mine]}
+
+    def _partner_booking(self, ctx: Context, raw: dict, step: dict) -> tuple[int, dict]:
+        """The coordinator enters the time the partner reported: offer + confirm, marked «у партнёра»."""
+        when = ctx.body.get("partner_time")
+        try:
+            if datetime.fromisoformat(str(when)).tzinfo is None:
+                raise ValueError
+        except ValueError:
+            raise GatewayError(400, "invalid_input", "Укажите дату и время, которые сообщил партнёр.") from None
+        clinic = text(ctx.body.get("partner_clinic_id"), "partner_clinic_id", 128)
+        ref = (raw.get("source_report") or {}).get("patient_ref")
+        if not any(r.get("patient_ref") == ref and r.get("to_clinic_id") == clinic and r.get("status") == "accepted"
+                   for r in self._referrals(ctx)):
+            raise GatewayError(409, "referral_not_accepted", "Записать к партнёру можно после того, как он принял направление.")
+        if step.get("status") not in {"open", "offered"} or raw.get("status") != "active":
+            raise GatewayError(409, "step_unavailable", "Этот шаг сейчас нельзя записать. Обновите карточку.")
+        evidence = f"Запись у партнёра: {self._clinic_names(ctx).get(clinic, clinic)}"
+        if step["status"] == "open":
+            self.upstream.json("path", "POST", self._path_route(raw["id"], step["id"], "offer"), auth="path_admin",
+                               body={"actor": ctx.session.actor, "evidence": evidence, "appointment_at": when})
+        updated = self.upstream.json("path", "POST", self._path_route(raw["id"], step["id"], "confirm"), auth="path_admin",
+                                     body={"actor": ctx.session.actor, "evidence": evidence, "appointment_at": when})
+        return 200, {"episode": staff_episode(updated, self._patient_names().get(ref, "Пациент не указан"))}
 
 
 def make_handler(gateway: Gateway):

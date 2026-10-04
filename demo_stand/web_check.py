@@ -24,13 +24,15 @@ SCREENS = [
     ("staff", "partners"), ("staff", "pharmacyAdmin"), ("staff", "rules"), ("staff", "analytics"),
     ("doctor", "reading"), ("doctor", "study"), ("doctor", "doctor"), ("doctor", "requests"), ("doctor", "inbox"),
     ("patient", "services"), ("staff", "services"), ("doctor", "services"),
+    ("partner", "incoming"), ("partner", "services"),
 ]
 WIDTHS = (390, 820, 1280, 1680)
 MAX_DIFF = 0.01
 
 # Pixel comparison with the prototype. A screen leaves this list when it moves to service data (tasks 04-07).
 COMPARE = [s for s in SCREENS if s[1] not in {"services", "home", "plan", "appointments", "inbox", "case", "scheduling",
-                                             "imaging", "reading", "study", "review", "rules", "analytics", "doctor"}]
+                                             "imaging", "reading", "study", "review", "rules", "analytics", "doctor",
+                                             "partners", "documents", "incoming"}]
 # Intentional differences. Masked areas are painted over in both screenshots before comparing.
 MASKS = [".brand small"]  # sidebar subtitle: «Демо-стенд» instead of «Прототип · версия 2»
 INTENTIONAL = [
@@ -39,6 +41,7 @@ INTENTIONAL = [
     "имена из сессии: в журнале и новых записях вместо текста прототипа (на стартовых экранах совпадают)",
     "экраны снимков работают на сервисе снимков: настоящие срезы вместо схем, загрузка ZIP с DICOM, без рентгена (не сравниваются)",
     "создание маршрута выключено до задания 07",
+    "«Партнёры», «Документы» и кабинет клиники-партнёра работают на сервисе клиники: без выдуманных чисел (не сравниваются)",
 ]
 CSP_PROBE = ("window.__mmCsp = [];"
              "document.addEventListener('securitypolicyviolation', e => window.__mmCsp.push(e.violatedDirective + ' ' + e.blockedURI));")
@@ -55,7 +58,7 @@ def wait_ready(page) -> None:
 
 def open_screen(page, role: str, name: str) -> None:
     page.evaluate(f"location.hash = '#/{role}/{name}'")
-    page.wait_for_function(f"() => location.hash === '#/{role}/{name}' && document.querySelector('#role').value === '{role}'",
+    page.wait_for_function(f"() => location.hash.split('?')[0] === '#/{role}/{name}' && document.querySelector('#role').value.split(':')[0] === '{role}'",
                            timeout=8000)
     wait_ready(page)
 
@@ -220,6 +223,56 @@ def check_imaging(browser) -> list[str]:
     return failures
 
 
+def check_referral(browser) -> list[str]:
+    """Coordinator and partner windows side by side: the seeded referral of Олег Р. without a name until accepted,
+    the partner's time, «услуга оказана», and the coordinator marks the visit."""
+    from datetime import datetime, timedelta
+    context = browser.new_context(viewport={"width": 1280, "height": 900})
+    staff, partner = context.new_page(), context.new_page()
+    staff_errors, partner_errors = watch(staff), watch(partner)
+    failures = []
+
+    def open_case():  # the address does not keep the selected case: open it from the inbox again
+        staff.goto(APP + "/#/staff/inbox")
+        staff.reload()
+        staff.wait_for_selector("tr:has-text('Олег') [data-case]")
+        staff.click("tr:has-text('Олег') [data-case]")
+        staff.wait_for_selector("#view:has-text('Где выполнить шаг')")
+    open_case()
+    text = staff.inner_text("#view")
+    for word in ("Диагностический центр на Лесной", "у нас", "Ждёт ответа партнёра", "Учтено из карты"):
+        if word not in text:
+            failures.append(f"в карточке Олега Р. нет «{word}»")
+    partner.goto(APP + "/#/partner/incoming?clinic=clinic-partner-1")
+    partner.wait_for_selector("[data-action=partnerOpen]")
+    partner.click("[data-action=partnerOpen] >> nth=0")
+    partner.wait_for_selector("#view:has-text('ФИО и контакт откроются после принятия направления')")
+    if "Романов" in partner.inner_text("#view") or "Олег" in partner.inner_text("#view"):
+        failures.append("партнёр видит ФИО до принятия")
+    if "Плохо слышит" in partner.inner_text("#view"):
+        failures.append("партнёр видит запись «только для своей клиники»")
+    partner.click("[data-action=partnerAct][data-act=accept]")
+    partner.wait_for_selector("#view:has-text('Романов')")
+    open_case()
+    staff.wait_for_selector("[data-action=partnerTimeOpen]")
+    staff.click("[data-action=partnerTimeOpen]")
+    staff.fill("#ptTime", (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%dT10:00"))
+    staff.click("[data-action=partnerTimeSave]")
+    staff.wait_for_selector("[data-action=pathStaffAct][data-act=attend]")
+    partner.click("[data-action=partnerAct][data-act=complete]")
+    partner.wait_for_selector("#view .badge:has-text('Услуга оказана')")
+    open_case()
+    staff.wait_for_selector("#view:has-text('Партнёр сообщил: услуга оказана')")
+    staff.click("[data-action=pathStaffAct][data-act=attend]")
+    staff.wait_for_selector("#view:has-text('Ждём итог врача')")
+    if staff.eval_on_selector("#role", "e => e.value") != "staff" or not partner.eval_on_selector("#role", "e => e.value").startswith("partner"):
+        failures.append("окна координатора и партнёра смешали роли")
+    if staff_errors or partner_errors:
+        failures.append("ошибки в консоли: " + "; ".join(staff_errors + partner_errors))
+    context.close()
+    return failures
+
+
 def masked(image: Image.Image, boxes: list[tuple[int, int, int, int]]) -> Image.Image:
     image = image.convert("RGB")
     draw = ImageDraw.Draw(image)
@@ -282,7 +335,8 @@ def main() -> int:
                       ("Нет горизонтальной прокрутки при 390, 820, 1280 и 1680 px", check_widths),
                       ("Сквозной сценарий: запись → итог врача и рецепт → второй этап → бронь в аптеке", check_scenario),
                       ("Два окна с разными ролями не мешают друг другу", check_two_windows),
-                      ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging)]
+                      ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging),
+                      ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral)]
             for title, check in checks:
                 failures = check(browser)
                 results.append(not failures)

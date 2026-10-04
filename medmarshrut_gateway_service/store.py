@@ -118,17 +118,18 @@ class GatewayStore:
         try:
             with self.db.cursor() as cur:
                 cur.execute("SELECT to_regclass('services'), to_regclass('finding_texts'), "
-                            "to_regclass('slots'), to_regclass('appointments'), to_regclass('study_registry')")
+                            "to_regclass('slots'), to_regclass('appointments'), to_regclass('study_registry'), "
+                            "to_regclass('referral_links')")
                 if not all(cur.fetchone()):
                     raise StoreError("Миграция шлюза не применена. Запустите migrate.py apply для выбранной схемы.")
-                cur.execute("""SELECT count(*)=9 AND bool_and(
+                cur.execute("""SELECT count(*)=10 AND bool_and(
                                has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'SELECT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'INSERT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'UPDATE')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'DELETE'))
                                FROM pg_tables WHERE schemaname=%s AND tablename IN
                                 ('services','service_followups','finding_texts','slots','appointments',
-                                'threads','messages','outcome_submissions','study_registry')""",
+                                'threads','messages','outcome_submissions','study_registry','referral_links')""",
                             (self.schema, self.schema, self.schema, self.schema, self.schema))
                 if not cur.fetchone()[0]:
                     raise StoreError("Серверной роли нужны права чтения и записи таблиц шлюза.")
@@ -140,7 +141,8 @@ class GatewayStore:
     def clear_working(self) -> None:
         """Clean data tied to IDs of the freshly recreated core services."""
         with self.transaction() as cur:
-            for table in ("messages", "threads", "appointments", "slots", "outcome_submissions", "study_registry"):
+            for table in ("messages", "threads", "appointments", "slots", "outcome_submissions", "study_registry",
+                          "referral_links"):
                 cur.execute(f"DELETE FROM {table}")
 
     def seed_catalog(self, clinic_id: str) -> None:
@@ -352,6 +354,30 @@ class GatewayStore:
                         (clinic_id, job_id))
             row = cur.fetchone()
         return self._study_row(row) if row else None
+
+    def link_referral(self, referral_id: str, episode_id: str, step_id: str, created_by: str) -> dict:
+        """Idempotent: a repeat for the same step returns the stored link, another step is a conflict."""
+        with self.transaction() as cur:
+            cur.execute("""INSERT INTO referral_links (referral_id, episode_id, step_id, created_by)
+                           VALUES (%s,%s,%s,%s) ON CONFLICT (referral_id) DO NOTHING""",
+                        (referral_id, episode_id, step_id, created_by))
+            cur.execute("SELECT referral_id, episode_id, step_id, created_by, created_at FROM referral_links "
+                        "WHERE referral_id=%s", (referral_id,))
+            row = cur.fetchone()
+        link = {"referral_id": row[0], "episode_id": row[1], "step_id": row[2], "created_by": row[3],
+                "created_at": row[4].isoformat()}
+        if (link["episode_id"], link["step_id"]) != (episode_id, step_id):
+            raise StoreConflict("Это направление уже связано с другим шагом плана. Откройте его во вкладке «Направления».")
+        return link
+
+    def referral_links(self, referral_ids: list[str] | None = None) -> dict[str, dict]:
+        with self.transaction(read_only=True) as cur:
+            if referral_ids is None:
+                cur.execute("SELECT referral_id, episode_id, step_id FROM referral_links")
+            else:
+                cur.execute("SELECT referral_id, episode_id, step_id FROM referral_links WHERE referral_id = ANY(%s)",
+                            (list(referral_ids),))
+            return {row[0]: {"episode_id": row[1], "step_id": row[2]} for row in cur.fetchall()}
 
     def outcome_timestamp(self, event_id: str, episode_id: str, step_id: str,
                           physician_id: str, content: dict) -> str:

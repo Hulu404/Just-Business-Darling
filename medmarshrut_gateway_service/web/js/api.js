@@ -22,7 +22,9 @@ async function send(method, path, role, body){
   return data;
 }
 
-export const createSession = (role, extra = {}) => send('POST', '/api/session', role, {role, ...extra});
+/* Поля новой сессии по ролям: окно партнёра открывает сессию своей клиники (main.js задаёт clinic_id) */
+export const sessionExtras = {};
+export const createSession = (role, extra = sessionExtras[role] || {}) => send('POST', '/api/session', role, {role, ...extra});
 
 /* Запрос от имени роли. Если сессии роли нет или она истекла, создаёт её и повторяет запрос один раз */
 export async function api(method, path, {role, body} = {}){

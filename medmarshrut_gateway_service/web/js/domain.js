@@ -1,5 +1,5 @@
 import { actor } from './actions.js';
-import { DEMO, MOD_LABEL, NEXT, PARTNERS, RULES, SERVICES, partnerOnly, slotsFor } from './demo-data.js';
+import { DEMO, MOD_LABEL, NEXT, RULES, SERVICES, partnerOnly, slotsFor } from './demo-data.js';
 import { doctor } from './pages/doctor.js';
 import { pharmacy } from './pages/patient.js';
 import { who } from './pages/staff.js';
@@ -18,12 +18,13 @@ export const slotLine = slot => slot ? `${slot.date}, ${slot.time}` : '';
 export const slotFull = slot => slot ? `${slot.date}, ${slot.time} · ${slot.who} · ${slot.place}` : '';
 export const refKey = (e, s) => `${e.id}:${s.id}`;
 export function byKey(key){ const [eid, sid] = String(key || '').split(':'); const e = ep(eid); return [e, stepOf(e, sid)]; }
+/* Демо-слоты задания 07: название партнёра берётся из места слота */
 export function wherePartner(s){
-  if (s.slot) return s.slot.partner || null;
+  if (s.slot) return s.slot.partner ? s.slot.place : null;
   const list = slotsFor(s.service);
-  return list.every(x => x.partner) ? list[0].partner : null;
+  return list.every(x => x.partner) ? list[0].place : null;
 }
-export const whereBadge = s => { const p = wherePartner(s); return p ? badge('Партнёр: ' + PARTNERS[p].name, 'violet') : ''; };
+export const whereBadge = s => { const p = wherePartner(s); return p ? badge('Партнёр: ' + p, 'violet') : ''; };
 
 export function addLog(e, who, text){ e.log.push({t:'Только что', who, text}); }
 export function pushMsg(from, text, actions){ state.messages.push({id:'m' + (++ui.seq), from, t:'Только что', text, actions:actions || [], unread:from === 'clinic'}); }
@@ -37,18 +38,11 @@ export function mkStep(e, service, cycle, by, due){
   e.steps.push(s);
   return s;
 }
-export function upsertReferral(e, s, status){
-  let r = state.referrals.find(x => x.episodeId === e.id && x.stepId === s.id);
-  if (!r){ r = {id:'rf' + (++ui.seq), patient:e.patient, service:s.service, partner:wherePartner(s), status, episodeId:e.id, stepId:s.id}; state.referrals.unshift(r); }
-  else { r.status = status; r.partner = wherePartner(s) || r.partner; }
-  return r;
-}
 export function resume(e){ e.callback = false; if (e.status === 'paused'){ e.status = 'active'; e.reason = ''; } }
 
 export function bookStep(e, s, slot, actor){
   s.status = 'confirmed'; s.slot = slot; s.overdue = false; resume(e);
   addLog(e, actor === 'patient' ? 'Пациент' : staffName(), `${actor === 'patient' ? 'Запись из личного кабинета' : 'Запись по звонку'}: ${title(s)} — ${lc(slotLine(slot))}`);
-  if (slot.partner) upsertReferral(e, s, 'Записан у партнёра');
   notify(e, 'Подтверждение записи', `Вы записаны: ${lc(title(s))}, ${lc(slotLine(slot))}, ${slot.place}.${slot.partner ? ' Направление и заключение уже у партнёра.' : ''}`, [['Открыть план', 'nav', 'plan']]);
 }
 export function offerStep(e, s, slot){
@@ -58,11 +52,6 @@ export function offerStep(e, s, slot){
 }
 export function attendStep(e, s){ s.status = 'attended'; addLog(e, 'Регистратура', 'Визит состоялся: ' + title(s)); }
 export function unbookStep(e, s, who){
-  const ref = state.referrals.find(r => r.episodeId === e.id && r.stepId === s.id && r.status === 'Записан у партнёра');
-  if (ref){
-    if (partnerOnly(s.service)) ref.status = 'Ожидает записи';
-    else state.referrals = state.referrals.filter(r => r !== ref);
-  }
   addLog(e, who, `Запись отменена: ${title(s)} — ${lc(slotLine(s.slot))}`);
   s.status = 'open'; s.slot = null;
 }

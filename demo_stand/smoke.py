@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from stand_api import (DEMO_DIR, GATEWAY, Gateway, StandError, call, clinic_signed, clinic_staff, confirm, env, expect,
-                       find_episode, load_json, path_post, review, step_action, upload_kit, upload_study, utf8_console)
+                       find_episode, load_json, path_get, path_post, review, step_action, upload_kit, upload_study, utf8_console)
 from synthetic_dicom import build_study
 
 HOME, PARTNER = "clinic-central", "clinic-partner-1"
@@ -234,7 +234,57 @@ def main() -> int:
                                           {"conclusion": conclusions["DEMO_MG_DENSITY"]})
         nxt = expect(status, body, 200, "Подтверждение маммографии")["next"]
         check(nxt.get("status") == "manual_review", f"что дальше: {nxt}")
-        return f"четыре проекции, после подтверждения — ручной разбор: «{nxt['reason']}»"
+        body = expect(*staff.call("GET", f"/api/staff/episodes/{nxt['episode_id']}/route-candidates"), 200, "Кандидаты маммографии")
+        clinics = sorted(c["clinic_id"] for c in body["candidates"])
+        check(clinics == [HOME, "clinic-partner-2"], f"кандидаты маммографии: {clinics}")
+        return f"четыре проекции, после подтверждения — ручной разбор: «{nxt['reason']}»; кандидаты — своя клиника и «Опора»"
+
+    def step17():
+        staff = ctx["staff"] = Gateway("staff")
+        partner = ctx["partner"] = Gateway("partner", clinic_id=PARTNER)
+        # the referral of step 9 is still accepted: the partner closes it, so a new one can be proposed
+        old = next(r for r in expect(*partner.call("GET", "/api/partner/referrals"), 200, "Направления партнёра")["referrals"]
+                   if r["patient_ref"] == ref and r["status"] == "accepted")
+        expect(*partner.call("POST", f"/api/partner/referrals/{old['id']}/complete", {}), 200, "Завершение старого направления")
+        episode = find_episode(ctx["gw_job"])
+        ctx["gw_episode"], ctx["gw_step"] = episode["id"], episode["plan_steps"][0]["id"]
+        body = expect(*staff.call("GET", f"/api/staff/episodes/{episode['id']}/route-candidates"), 200, "Кандидаты через шлюз")
+        roles = {(c["clinic_id"], c["role"]) for c in body["candidates"]}
+        check({(HOME, "home"), (PARTNER, "partner")} <= roles, f"кандидаты: {body}")
+        body = expect(*staff.call("POST", f"/api/staff/episodes/{episode['id']}/steps/{ctx['gw_step']}/referral",
+                                  {"to_clinic_id": PARTNER, "reason": "Смоук: КТ у партнёра"}), 201, "Направление через шлюз")
+        check(body["referral"]["status"] == "proposed" and body["link"]["step_id"] == ctx["gw_step"], f"направление: {body}")
+        ctx["gw_referral"] = body["referral"]
+        return "кандидаты «у нас» и партнёр, направление создано и связано с шагом"
+
+    def step18():
+        partner, referral = ctx["partner"], ctx["gw_referral"]
+        card_route = f"/api/partner/patients/{referral['patient_id']}/card"
+        before = expect(*partner.call("GET", card_route), 200, "Карта у партнёра до принятия")
+        check(not {"full_name", "birth_date", "contact"} & set(before["patient"]) and "Внутренняя заметка" not in str(before),
+              f"партнёр видит лишнее до принятия: {before['patient']}")
+        expect(*partner.call("POST", f"/api/partner/referrals/{referral['id']}/accept", {"note": "Ждём пациента"}), 200, "Принятие")
+        after = expect(*partner.call("GET", card_route), 200, "Карта у партнёра после принятия")
+        check(after["patient"].get("full_name") == "Пациент смоук-проверки", f"после принятия: {after['patient']}")
+        return "до принятия без ФИО и внутренних записей, после принятия ФИО есть"
+
+    def step19():
+        staff, partner = ctx["staff"], ctx["partner"]
+        when = stamp(now + timedelta(days=3))
+        body = expect(*staff.call("POST", f"/api/staff/episodes/{ctx['gw_episode']}/steps/{ctx['gw_step']}/confirm",
+                                  {"partner_time": when, "partner_clinic_id": PARTNER}), 200, "Запись у партнёра")
+        step = next(s for s in body["episode"]["steps"] if s["id"] == ctx["gw_step"])
+        check(step["status"] == "confirmed", f"шаг после записи: {step}")
+        before = len(path_get(f"/v1/episodes/{ctx['gw_episode']}")["audit_events"])
+        expect(*partner.call("POST", f"/api/partner/referrals/{ctx['gw_referral']['id']}/complete", {}), 200, "Услуга оказана")
+        check(len(path_get(f"/v1/episodes/{ctx['gw_episode']}")["audit_events"]) == before, "завершение у партнёра изменило эпизод")
+        refs = expect(*staff.call("GET", "/api/staff/referrals"), 200, "Направления координатора")["referrals"]
+        mine = next(r for r in refs if r["id"] == ctx["gw_referral"]["id"])
+        check(mine["status"] == "completed" and mine["link"] == {"episode_id": ctx["gw_episode"], "step_id": ctx["gw_step"]},
+              f"направление у координатора: {mine}")
+        body = expect(*staff.call("POST", f"/api/staff/episodes/{ctx['gw_episode']}/steps/{ctx['gw_step']}/attend", {}), 200, "Визит")
+        check(next(s for s in body["episode"]["steps"] if s["id"] == ctx["gw_step"])["status"] == "attended", "визит не отмечен")
+        return "время партнёра записано, «услуга оказана» не тронула эпизод, координатор отметил визит сам"
 
     steps = [("Регистрация пациента в сервисе клиники", step1),
              ("Загрузка учебной КТ", step2),
@@ -251,7 +301,10 @@ def main() -> int:
              ("Врач: список, срез PNG, подтверждение", step13),
              ("Пациент видит заключение, объяснение и шаг", step14),
              ("Архив не из учебного набора через шлюз", step15),
-             ("Маммография через шлюз", step16)]
+             ("Маммография через шлюз", step16),
+             ("Кандидаты и направление через шлюз", step17),
+             ("Партнёр принимает направление", step18),
+             ("Запись у партнёра, услуга оказана, визит", step19)]
     print(f"Смоук-проверка на пациенте {ref}", flush=True)
     for number, (title, run) in enumerate(steps, 1):
         try:

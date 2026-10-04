@@ -23,9 +23,15 @@ REF_RE = re.compile(r"[A-Za-z0-9_.-]{2,128}")
 # Upstream error texts (English, see docs/api-contracts.md) -> message for a person.
 # Codes are inconsistent across services, so the message text decides.
 MESSAGES = [
-    ("Active referral already exists", "У пациента уже есть действующее направление в эту клинику. Дождитесь решения по нему или отмените его."),
-    ("Target clinic is not an active partner", "Эта клиника не партнёр вашей клиники. Выберите другую клинику."),
-    ("Only active patients can be referred", "Направление можно оформить только для активного пациента."),
+    ("Active referral already exists", "Направление этому партнёру уже есть. Дождитесь решения партнёра или отмените направление во вкладке «Направления»."),
+    ("Target clinic is not an active partner", "Клиника не входит в число действующих партнёров. Выберите другую клинику из списка."),
+    ("Only active patients can be referred", "Направить можно только активного пациента. Проверьте статус карты в регистратуре."),
+    ("Referral must originate from the home clinic", "Направить пациента может только его домашняя клиника."),
+    ("Only target clinic can", "Это действие доступно только клинике, которая получила направление."),
+    ("Only source clinic can cancel", "Отменить направление может только клиника, которая его отправила."),
+    ("Referral cannot be cancelled", "Это направление уже нельзя отменить: партнёр его завершил или отклонил."),
+    ("Only home clinic can append anamnesis", "Добавлять записи в анамнез может только домашняя клиника пациента."),
+    ("Patient is deceased", "Карта пациента закрыта для новых записей."),
     ("Referral is not proposed", "Решение по направлению уже принято. Обновите страницу."),
     ("Referral must be accepted first", "Сначала примите направление, потом отмечайте его выполненным."),
     ("Earlier plan step is unfinished", "Сначала завершите предыдущий шаг плана."),

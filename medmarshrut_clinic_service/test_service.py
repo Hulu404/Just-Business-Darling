@@ -137,5 +137,51 @@ class ClinicServiceTests(unittest.TestCase):
                                 current_time=1000000000 + 1000))
 
 
+class ClinicHttpTests(unittest.TestCase):
+    """GET /v1/referrals and the 400 on a bad patients filter, through the real handler."""
+
+    def setUp(self):
+        import threading
+        from http.server import ThreadingHTTPServer
+        from service import make_handler
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.store = ClinicStore(root / "clinic.sqlite3", ClinicNetwork(make_network(root)))
+        self.addCleanup(self.store.close)
+        self.tokens = {"token-a-0123456789": "clinic-a", "token-b-0123456789": "clinic-b", "token-c-0123456789": "clinic-c"}
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.store, SECRET, "admin-token-0123456789",
+                                                                         self.tokens))
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def get(self, path, token):
+        import http.client
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
+        connection.request("GET", path, headers={"Authorization": "Bearer " + token})
+        response = connection.getresponse()
+        body = json.loads(response.read())
+        connection.close()
+        return response.status, body
+
+    def test_referrals_of_own_clinic_in_both_directions(self):
+        patient = self.store.create_patient("clinic-a", patient_payload())
+        referral = self.store.create_referral(patient.id, "clinic-a", "clinic-b", "MRI", "coord-a")
+        for token in ("token-a-0123456789", "token-b-0123456789"):
+            status, body = self.get("/v1/referrals", token)
+            self.assertEqual(status, 200, body)
+            self.assertEqual([(r["id"], r["patient_ref"]) for r in body["referrals"]], [(referral.id, "patient-1")])
+            self.assertNotIn("full_name", json.dumps(body))
+        self.assertEqual(self.get("/v1/referrals", "token-c-0123456789"), (200, {"referrals": []}))
+        self.assertEqual(self.get("/v1/referrals?status=accepted", "token-a-0123456789"), (200, {"referrals": []}))
+        self.assertEqual(self.get("/v1/referrals?status=nope", "token-a-0123456789")[0], 400)
+
+    def test_bad_patients_filter_is_400_not_a_dropped_connection(self):
+        for query in ("limit=abc", "limit=0", "limit=501", "status=nope"):
+            self.assertEqual(self.get("/v1/patients?" + query, "token-a-0123456789")[0], 400, query)
+        self.assertEqual(self.get("/v1/patients?limit=5", "token-a-0123456789")[0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

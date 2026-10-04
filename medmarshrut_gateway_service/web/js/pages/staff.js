@@ -1,4 +1,4 @@
-import { DEMO, PARTNERS, PHARMACIES, RULES, SERVICES, TRIGGERS, scenarios, slotsFor } from '../demo-data.js';
+import { DEMO, PHARMACIES, RULES, SERVICES, TRIGGERS, scenarios, slotsFor } from '../demo-data.js';
 import { analyze, byKey, currentStep, ep, highlight, live, queueInfo, refKey, slotFull, slotLine, studyOf, title, waitingOn, whereBadge } from '../domain.js';
 import { icon } from '../icons.js';
 import { intake } from './patient.js';
@@ -9,7 +9,6 @@ import { badge, btn, lc, modalHead, navBtn, openModal, plural, rub, safe } from 
    Экраны сотрудника клиники (часть из них видит и врач)
    ===================================================================== */
 export const S_STATUS = {open:['Не записан','orange'], offered:['Предложена запись','blue'], confirmed:['Записан',''], attended:['Ждёт итога врача','blue'], completed:['Выполнено','gray'], refused:['Отложен пациентом','red'], superseded:['Заменён','gray']};
-export const REF_FLOW = ['Ожидает записи', 'Записан у партнёра', 'Услуга оказана', 'Результат получен'];
 export const who = f => f === 'staff' ? staffName() : 'Врач';
 
 export function nextStepLabel(e){
@@ -65,7 +64,7 @@ export function recBlock(e){
   const alt = last[0] && slotsFor(last[0].service).find(x => x.partner);
   const head = last.length > 1 ? `<ul class="steplist">${last.map(s => `<li>${safe(title(s))}<span>${safe(s.due || 'по плану')}</span></li>`).join('')}</ul>` : `<strong style="font-size:21px;line-height:1.3;display:block">${last.map(title).join('') || 'Шагов нет'}</strong>`;
   return `<div class="panel"><h3>Рекомендация следующего шага</h3>${head}
-    <dl class="kv" style="margin-top:14px">${last.length > 1 ? '' : `<dt>Срок</dt><dd>${safe((last[0] && last[0].due) || (rule && rule.due) || 'по плану')}</dd>`}<dt>Основание</dt><dd>${safe(by)}${by.startsWith('Правило') ? ' · утверждено клиникой' : ''}</dd><dt>Учтено из карты</dt><dd>${e.profile.map(safe).join(' · ')}</dd><dt>Если нет времени</dt><dd>${alt ? `${safe(PARTNERS[alt.partner].name)}: ${safe(lc(alt.date))}, ${safe(alt.time)}` : 'Другой филиал или помощь координатора'}</dd></dl>
+    <dl class="kv" style="margin-top:14px">${last.length > 1 ? '' : `<dt>Срок</dt><dd>${safe((last[0] && last[0].due) || (rule && rule.due) || 'по плану')}</dd>`}<dt>Основание</dt><dd>${safe(by)}${by.startsWith('Правило') ? ' · утверждено клиникой' : ''}</dd><dt>Учтено из карты</dt><dd>${e.profile.map(safe).join(' · ')}</dd><dt>Если нет времени</dt><dd>${alt ? `${safe(alt.place)}: ${safe(lc(alt.date))}, ${safe(alt.time)}` : 'Другой филиал или помощь координатора'}</dd></dl>
     <p class="muted" style="margin:14px 0 0;font-size:13.5px">Срок задаёт правило клиники или врач. Оценка модели на срочность не влияет.</p></div>`;
 }
 export function staffStep(e, s, isCur, isLast){
@@ -102,9 +101,9 @@ export function staffActions(e){
   } else if (s && s.status === 'offered'){
     b = btn('Записать по звонку', 'slotList', '', {key, mode:'staff'}) + btn('Предложить другое время', 'slotList', 'secondary', {key, mode:'offer'});
   } else if (s && s.status === 'confirmed'){
-    b = (s.slot.partner ? btn('Услуга у партнёра оказана', 'refStep', '', {key}) : btn('Визит состоялся', 'attend', '', {key})) + btn('Отменить запись', 'unbook', 'secondary', {key});
+    b = btn('Визит состоялся', 'attend', '', {key}) + btn('Отменить запись', 'unbook', 'secondary', {key});
   } else if (s && s.status === 'attended'){
-    b = s.slot && s.slot.partner ? btn('Результат от партнёра получен', 'refStep', '', {key}) : btn('Напомнить врачу про итог', 'nudgeDoctor', '', {id:e.id});
+    b = btn('Напомнить врачу про итог', 'nudgeDoctor', '', {id:e.id});
   } else if (!s && e.status === 'active'){
     b = btn('Запросить решение врача', 'askDoctor', '', {id:e.id});
   }
@@ -206,21 +205,7 @@ export function comms(){
     <div class="note" style="margin-top:16px">Пациент сам выбирает канал и тихие часы. Текст заключения в SMS и мессенджеры не уходит: там только ссылка в личный кабинет.</div>`;
 }
 
-/* ---------- Партнёры ---------- */
-export function partners(){
-  const tab = state.sel.partnersTab;
-  const refs = state.referrals;
-  let body = '';
-  if (tab === 'clinics'){
-    body = `<div class="grid two">${Object.entries(PARTNERS).map(([id, p]) => `<div class="card"><div class="tile violet">${icon('link')}</div><h3>${safe(p.name)}</h3><p>${safe(p.services)}</p><dl class="kv" style="margin-top:14px"><dt>Обмен данными</dt><dd>${safe(p.exchange)}</dd><dt>До записи</dt><dd>в среднем ${safe(p.wait)}</dd><dt>Направлено за месяц</dt><dd>${safe(p.sent)}</dd><dt>Вернулись к нам</dt><dd>${safe(p.back)}</dd></dl></div>`).join('')}</div>`;
-  } else if (tab === 'refs'){
-    body = `<div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Услуга</th><th>Партнёр</th><th>Статус</th><th></th></tr></thead><tbody>${refs.map(r => { const i = REF_FLOW.indexOf(r.status); const next = ['Записать у партнёра', 'Услуга оказана', 'Результат получен'][i]; return `<tr><td>${r.episodeId ? `<button class="linkbtn" data-case="${safe(r.episodeId)}">${safe(r.patient)}</button>` : `<strong>${safe(r.patient)}</strong>`}</td><td>${SERVICES[r.service].title}</td><td>${safe(PARTNERS[r.partner].name)}</td><td>${badge(r.status, i === 3 ? 'gray' : i === 0 ? 'orange' : 'blue')}</td><td>${next ? btn(next, 'refAdvance', 'secondary small', {id:r.id}) : ''}</td></tr>`; }).join('')}</tbody></table></div><div class="note" style="margin-top:16px">Пациент не выпадает из плана: когда партнёр присылает результат, шаг закрывается, а врач клиники получает запрос на следующий шаг.</div>`;
-  } else {
-    body = `<div class="grid three">${PHARMACIES.map(x => `<div class="card"><div class="tile">${icon('pharmacy')}</div><h3>${safe(x.name)}</h3><p>${safe(x.addr)} · ${safe(x.dist)}</p><dl class="kv" style="margin-top:14px"><dt>Наличие</dt><dd>Обновляется через API</dd><dt>Рецепты</dt><dd>Принимает электронные</dd></dl></div>`).join('')}</div>`;
-  }
-  return `<div class="pagehead"><div><div class="eyebrow">Путь пациента за пределами клиники</div><h1>Партнёры</h1><p>Если услуги нет или нет времени, пациент идёт к партнёру с направлением и возвращается с результатом в тот же план.</p></div></div>
-    <div class="tabs">${[['clinics', 'Клиники-партнёры'], ['refs', `Направления · ${refs.length}`], ['pharm', 'Аптеки-партнёры']].map(([id, label]) => `<button class="tab ${tab === id ? 'active' : ''}" data-action="partnersTab" data-id="${id}">${label}</button>`).join('')}</div>${body}`;
-}
+/* ---------- Партнёры: экран в clinic-ui.js ---------- */
 
 /* ---------- Аптека и заказы ---------- */
 export function pharmacyAdmin(){

@@ -238,10 +238,29 @@ def make_handler(store: ClinicStore, shared_secret: str, admin_token: str,
                 if not scope and not is_admin:
                     self._json(400, {"error": "clinic_id is required"})
                     return
-                limit = int(query.get("limit", "100"))
-                status = query.get("status")
-                items = store.list_patients(scope, status=status, limit=limit)
+                try:
+                    limit = int(query.get("limit", "100"))
+                    items = store.list_patients(scope, status=query.get("status"), limit=limit)
+                except ValueError as exc:  # ClinicError is a ValueError too
+                    self._json(400, {"error": str(exc) if isinstance(exc, ClinicError) else "Invalid limit"})
+                    return
                 self._json(200, {"patients": [p.__dict__ for p in items]})
+                return
+            if path == "/v1/referrals":
+                if not clinic_id:
+                    self._json(400, {"error": "Clinic scope required"})
+                    return
+                try:
+                    items = store.list_referrals(clinic_id=clinic_id, status=query.get("status"))
+                except ClinicError as exc:
+                    self._json(400, {"error": str(exc)})
+                    return
+                refs = {}
+                for referral in items:
+                    if referral.patient_id not in refs:
+                        patient = store.get_patient(referral.patient_id)
+                        refs[referral.patient_id] = patient.patient_ref if patient else None
+                self._json(200, {"referrals": [{**r.to_dict(), "patient_ref": refs[r.patient_id]} for r in items]})
                 return
             if path == "/v1/staff/queue":
                 if not clinic_id:

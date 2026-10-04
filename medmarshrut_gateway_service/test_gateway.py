@@ -378,7 +378,7 @@ class UpstreamFailureTests(GatewayTestCase):
     def test_upstream_error_text_and_detail_by_role(self):
         error = human_error("clinic", 409, {"error": "Active referral already exists for this pair"})
         self.assertEqual((error.status, error.code), (409, "upstream_rejected"))
-        self.assertIn("уже есть действующее направление", error.message)
+        self.assertIn("Направление этому партнёру уже есть", error.message)
         self.assertNotIn("detail", error.payload(show_detail=False)["error"])
         self.assertEqual(error.payload(show_detail=True)["error"]["detail"], "Active referral already exists for this pair")
         self.assertEqual(human_error("path", 403, {"error": "Administrator authorization required"}).status, 502)

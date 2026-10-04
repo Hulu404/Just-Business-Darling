@@ -44,7 +44,7 @@ class StudyRegistryTests(unittest.TestCase):
                         "WHERE n.nspname=%s AND c.relname='study_registry'", (store.schema, store.schema))
             self.assertEqual(cur.fetchone(), (True, 0))
             cur.execute("SELECT version FROM schema_migrations ORDER BY version")
-            self.assertEqual([r[0] for r in cur.fetchall()], ["001_path", "002_study_registry"])
+            self.assertEqual([r[0] for r in cur.fetchall()], sorted(f.stem for f in migrate.MIGRATIONS.glob("[0-9]*.sql")))
 
     def test_repeat_registration_is_idempotent_and_other_owner_conflicts(self):
         store = self.schema()
@@ -61,6 +61,18 @@ class StudyRegistryTests(unittest.TestCase):
         self.register(store, "job-3", "demo-patient-1", clinic_id="clinic-partner-1")
         self.assertEqual([r["job_id"] for r in store.studies("clinic-central", "demo-patient-1")], ["job-1"])
         self.assertIsNone(store.study("clinic-central", "job-3"))
+
+    def test_referral_links_idempotent_isolated_cleared_and_kept(self):
+        first, second = self.schema(), self.schema()
+        link = first.link_referral("ref-1", "ep-1", "s1", "coordinator-natalia")
+        self.assertEqual(first.link_referral("ref-1", "ep-1", "s1", "coordinator-natalia"), link)
+        with self.assertRaises(StoreConflict):
+            first.link_referral("ref-1", "ep-2", "s9", "coordinator-natalia")
+        self.assertEqual(second.referral_links(), {})
+        first.seed_catalog("clinic-central")  # the catalogue reset of a --keep start leaves links alone
+        self.assertEqual(first.referral_links(["ref-1"]), {"ref-1": {"episode_id": "ep-1", "step_id": "s1"}})
+        first.clear_working()  # a clean start
+        self.assertEqual(first.referral_links(), {})
 
     def test_schemas_are_isolated_and_clean_start_clears_the_registry(self):
         first, second = self.schema(), self.schema()

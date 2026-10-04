@@ -24,13 +24,6 @@ export const SERVICES = {
   rehab:{title:'Курс лечебной физкультуры'}
 };
 
-export const PARTNERS = {
-  'p-sev':{name:'Клиника «Северная»', services:'Терапевт, пульмонолог, УЗИ', exchange:'Через API', wait:'1 день', sent:38, back:'74%'},
-  'p-les':{name:'Диагностический центр на Лесной', services:'КТ, МРТ, ПЭТ-КТ', exchange:'Через API', wait:'2 дня', sent:41, back:'81%'},
-  'p-mam':{name:'Маммологический центр «Опора»', services:'Биопсия, маммолог-онколог', exchange:'Выгрузка раз в сутки', wait:'4 дня', sent:17, back:'65%'},
-  'p-dvi':{name:'Клиника реабилитации «Движение»', services:'ЛФК, физиотерапия', exchange:'Выгрузка раз в сутки', wait:'3 дня', sent:22, back:'88%'}
-};
-
 export const SLOTS = {
   gp:[
     {id:'a', who:'Терапевт · Анна Соколова', place:'Центральный филиал', date:'Сегодня', time:'17:30', price:'3 200 ₽', format:'Очно'},
@@ -288,11 +281,6 @@ export function seed(){
       {t:'Вчера, 16:20', patient:'Елена П.', event:'Подтверждение записи', channel:'Мессенджер', status:'Прочитано', episodeId:'e4'},
       {t:'Вчера, 16:05', patient:'Сергей Т.', event:'Подтверждение записи', channel:'SMS', status:'Доставлено', episodeId:'e5'},
       {t:'Вчера, 12:05', patient:'Мария К.', event:'Заключение готово: план уточняет врач', channel:'Приложение', status:'Прочитано', episodeId:'e2'}
-    ],
-    referrals:[
-      {id:'rf1', patient:'Олег Р.', service:'ct2', partner:'p-les', status:'Ожидает записи', episodeId:'e3', stepId:'e3s2'},
-      {id:'rf2', patient:'Анна Л.', service:'biopsy', partner:'p-mam', status:'Услуга оказана', episodeId:null, stepId:null},
-      {id:'rf3', patient:'Пётр Д.', service:'rehab', partner:'p-dvi', status:'Результат получен', episodeId:null, stepId:null}
     ],
     prescriptions:[
       {id:'rx1', number:'77-0181', patient:'Демо-пациент', mine:true, doctor:'А. Соколова, терапевт', date:'12 сентября', valid:'до 11 ноября', items:[['Препарат А','таблетки, 30 шт.']], status:'issued', pharmacy:null, code:null}
