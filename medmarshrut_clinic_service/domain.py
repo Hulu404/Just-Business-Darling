@@ -51,6 +51,7 @@ class Patient:
     birth_date: str | None
     sex: str | None
     contact: str | None
+    communication_channel: str | None
     status: str
     created_at: str
     updated_at: str

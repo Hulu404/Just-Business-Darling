@@ -21,10 +21,11 @@ DEMO = ROOT / "demo_stand"
 HOST = "127.0.0.1"
 MARKER = ".medmarshrut-stand"
 CLINICS = ("clinic-central", "clinic-partner-1", "clinic-partner-2")
+PHARMACIES = ("pharm-central", "pharm-north", "pharm-south")
 SECRET_NAMES = ("PATH_SHARED_SECRET", "PATH_ADMIN_TOKEN", "PATH_PATIENT_TOKEN", "REVIEWER_TOKEN",
-                "CLINIC_SHARED_SECRET", "CLINIC_ADMIN_TOKEN", "CLINIC_STAFF_TOKENS")
+                "CLINIC_SHARED_SECRET", "CLINIC_ADMIN_TOKEN", "CLINIC_STAFF_TOKENS",
+                "MED_SHARED_SECRET", "MED_ADMIN_TOKEN", "MED_PATIENT_TOKEN", "MED_STAFF_TOKENS")
 
-# Processes of the stand, in start order. "env" gets (secrets, state folder, image mode).
 SERVICES = [
     {"name": "path", "title": "сервис пути", "port": 8765,
      "script": {"demo": "medmarshrut_path_service/service.py", "real": "medmarshrut_path_service/service.py"},
@@ -44,19 +45,37 @@ SERVICES = [
                               "ROUTER_URL": "http://127.0.0.1:8765/v1/reports",
                               "DEMO_STUDY_INDEX": str(state / "kit" / "index.json")},
      "pages": []},
+    {"name": "medications", "title": "сервис медикаментов", "port": 8767,
+     "script": {"demo": "medmarshrut_medications_service/service.py",
+                "real": "medmarshrut_medications_service/service.py"},
+     "env": lambda s, state, mode: {
+         "MED_SHARED_SECRET": s["MED_SHARED_SECRET"],
+         "MED_ADMIN_TOKEN": s["MED_ADMIN_TOKEN"],
+         "MED_PATIENT_TOKEN": s["MED_PATIENT_TOKEN"],
+         "MED_STAFF_TOKENS": s["MED_STAFF_TOKENS"],
+         "MED_DB": str(state / "medications.sqlite3"),
+         "MED_CATALOG": str(ROOT / "medmarshrut_medications_service" / "catalog.json"),
+         "MED_INVENTORY": str(ROOT / "medmarshrut_medications_service" / "pharmacies.json"),
+     },
+     "pages": []},
     {"name": "gateway", "title": "шлюз и веб-приложение", "port": 8763, "health": "/api/health",
      "script": {"demo": "medmarshrut_gateway_service/service.py", "real": "medmarshrut_gateway_service/service.py"},
      "env": lambda s, state, mode: {"REVIEWER_TOKEN": s["REVIEWER_TOKEN"], "PATH_ADMIN_TOKEN": s["PATH_ADMIN_TOKEN"],
                                     "CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"],
                                     "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "GATEWAY_HOME_CLINIC": "clinic-central",
                                     "GATEWAY_STATE_DIR": str(state), "GATEWAY_PEOPLE": str(DEMO / "people.demo.json"),
-                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode), **GATEWAY_DB_ENV},
+                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode),
+                                    "MED_SHARED_SECRET": s["MED_SHARED_SECRET"],
+                                    "MED_ADMIN_TOKEN": s["MED_ADMIN_TOKEN"],
+                                    "MED_PATIENT_TOKEN": s["MED_PATIENT_TOKEN"],
+                                    "MED_STAFF_TOKENS": s["MED_STAFF_TOKENS"],
+                                    **GATEWAY_DB_ENV},
      "pages": []},
 ]
 APP_URL = f"http://{HOST}:8763"
-# Inherited variables that would silently change what the stand runs.
 STRIPPED_ENV = {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB", "PATH_RULES", "CLINIC_NETWORK",
                 "DEMO_STUDY_INDEX", "PATH_MIS_TOKEN", "CLINIC_MIS_TOKEN", "IMAGE_URL", "PATH_URL", "CLINIC_URL",
+                "MED_DB", "MED_CATALOG", "MED_INVENTORY", "MED_URL",
                 "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT",
                 "GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA", "GATEWAY_SUPABASE_PROJECT_REF"}
 
@@ -74,8 +93,10 @@ def say(text: str = "") -> None:
 
 
 def make_secrets() -> dict[str, str]:
-    values = {name: secrets.token_urlsafe(32) for name in SECRET_NAMES if name != "CLINIC_STAFF_TOKENS"}
+    structured = {"CLINIC_STAFF_TOKENS", "MED_STAFF_TOKENS"}
+    values = {name: secrets.token_urlsafe(32) for name in SECRET_NAMES if name not in structured}
     values["CLINIC_STAFF_TOKENS"] = json.dumps({secrets.token_urlsafe(32): clinic for clinic in CLINICS})
+    values["MED_STAFF_TOKENS"] = json.dumps({secrets.token_urlsafe(32): pharmacy for pharmacy in PHARMACIES})
     return values
 
 
@@ -89,7 +110,6 @@ def base_env(image_mode: str) -> dict[str, str]:
 
 
 def gateway_db_env(checking: str = "") -> dict[str, str]:
-    """Read only the server DB settings; never pass them to the three core services."""
     values = {key: os.environ[key] for key in ("GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA",
               "GATEWAY_SUPABASE_PROJECT_REF") if key in os.environ}
     path = ROOT / ".env"
@@ -203,7 +223,6 @@ class Stand:
         return subprocess.run([sys.executable, "-B", str(DEMO / script)], cwd=DEMO, env=self.tool_env()).returncode
 
     def newly_dead(self) -> list[tuple[dict, Path]]:
-        """Processes that stopped since the last check; each is reported once."""
         found = []
         for service, proc, err in self.procs:
             if proc.poll() is not None and service["name"] not in self.reported:
@@ -234,31 +253,26 @@ def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Демо-стенд МедМаршрута: три сервиса и учебные данные одной командой.")
-    parser.add_argument("--state-dir", type=Path, default=Path(tempfile.gettempdir()) / "medmarshrut-stand",
-                        help="папка состояния: базы, учебные архивы, журналы (по умолчанию во временном каталоге)")
-    parser.add_argument("--keep", action="store_true", help="не очищать папку состояния; наполнение при этом не запускается")
-    parser.add_argument("--no-seed", action="store_true", help="не наполнять стенд учебными случаями")
-    parser.add_argument("--smoke", action="store_true", help="чистый стенд, наполнение, смоук-проверка, остановка")
-    parser.add_argument("--web-check", action="store_true",
-                        help="чистый стенд, наполнение, проверки в браузере (Playwright), остановка")
-    parser.add_argument("--image", choices=("demo", "real"), default="demo",
-                        help="demo — сценарный backend снимков; real — настоящий сервис снимков (MODEL_CONFIG, если задан)")
-    parser.add_argument("--print-secrets", action="store_true", help="напечатать секреты для ручной работы с API")
+    parser = argparse.ArgumentParser(description="Демо-стенд МедМаршрута: пять сервисов и учебные данные одной командой.")
+    parser.add_argument("--state-dir", type=Path, default=Path(tempfile.gettempdir()) / "medmarshrut-stand")
+    parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--no-seed", action="store_true")
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--web-check", action="store_true")
+    parser.add_argument("--image", choices=("demo", "real"), default="demo")
+    parser.add_argument("--print-secrets", action="store_true")
     args = parser.parse_args()
     if hasattr(signal, "SIGBREAK"):
-        signal.signal(signal.SIGBREAK, signal.default_int_handler)  # Ctrl+Break stops the stand like Ctrl+C
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     checking = args.smoke or args.web_check
     if checking and (args.keep or args.image == "real" or args.no_seed):
-        parser.error("--smoke и --web-check проверяют чистый наполненный стенд со сценарным backend: "
-                     "не сочетаются с --keep, --no-seed и --image real")
+        parser.error("--smoke и --web-check проверяют чистый наполненный стенд со сценарным backend")
 
     busy = [s for s in SERVICES if port_busy(s["port"])]
     if busy:
         for service in busy:
             say(f"Порт {service['port']} занят: на нём уже что-то работает (нужен для: {service['title']}).")
-        say("Скорее всего, стенд уже запущен в другом окне. Остановите его (Ctrl+C в том окне) или закройте "
-            "программу, которая держит порт, и запустите снова.")
+        say("Скорее всего, стенд уже запущен в другом окне. Остановите его (Ctrl+C в том окне).")
         return 1
 
     state = args.state_dir.resolve()
@@ -285,8 +299,7 @@ def main() -> int:
         if args.print_secrets:
             print_secrets(values)
         if args.keep:
-            say("Флаг --keep: базы сохранены, наполнение пропущено. Задания сервиса снимков живут в памяти "
-                "и после перезапуска пропали: в списках исследований они отмечены «Недоступно: сервис снимков перезапущен».")
+            say("Флаг --keep: базы сохранены, наполнение пропущено.")
         elif not args.no_seed:
             say("Наполняю стенд учебными случаями…")
             if stand.run_tool("seed.py") != 0:
@@ -313,8 +326,7 @@ def main() -> int:
             time.sleep(0.5)
             for service, err in stand.newly_dead():
                 title = service["title"][0].upper() + service["title"][1:]
-                say(f"{title} остановился. Остальные процессы работают, в приложении он отмечен "
-                    f"недоступным. Чтобы вернуть его, перезапустите стенд. Последние строки журнала ошибок:")
+                say(f"{title} остановился. Остальные процессы работают. Последние строки журнала ошибок:")
                 say(tail(err))
     except KeyboardInterrupt:
         say("\nОстанавливаю стенд…")

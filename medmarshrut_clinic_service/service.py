@@ -134,8 +134,10 @@ def make_handler(store: ClinicStore, shared_secret: str, admin_token: str,
                 if path == "/v1/patients":
                     if not (clinic_id or is_mis):
                         raise ClinicError("Only clinic staff or MIS can register patients")
-                    if set(body) != {"home_clinic_id", "patient_ref", "full_name",
-                                     "birth_date", "sex", "contact"}:
+                    required = {"home_clinic_id", "patient_ref", "full_name",
+                                "birth_date", "sex", "contact"}
+                    allowed = required | {"communication_channel"}
+                    if not required <= set(body) or set(body) - allowed:
                         raise ClinicError("Invalid patient fields")
                     if clinic_id and body["home_clinic_id"] != clinic_id:
                         self._json(403, {"error": "Staff can register only own clinic patients"})

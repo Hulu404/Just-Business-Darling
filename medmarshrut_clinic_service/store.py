@@ -71,7 +71,9 @@ class ClinicStore:
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS patients (
                 id TEXT PRIMARY KEY, home_clinic_id TEXT NOT NULL, patient_ref TEXT NOT NULL UNIQUE,
-                full_name TEXT NOT NULL, birth_date TEXT, sex TEXT, contact TEXT, status TEXT NOT NULL,
+                full_name TEXT NOT NULL, birth_date TEXT, sex TEXT, contact TEXT,
+                communication_channel TEXT,
+                status TEXT NOT NULL,
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS anamnesis (
                 id TEXT PRIMARY KEY, patient_id TEXT NOT NULL REFERENCES patients(id),
@@ -91,6 +93,20 @@ class ClinicStore:
             CREATE INDEX IF NOT EXISTS idx_referrals_patient ON referrals(patient_id);
             CREATE INDEX IF NOT EXISTS idx_referrals_to ON referrals(to_clinic_id);
         """)
+        self._ensure_columns()
+
+
+    def _ensure_columns(self) -> None:
+        """Добавляет колонки, которых нет в старой БД. Безопасно вызывать при каждом старте."""
+        with self._lock:
+            cols = {row["name"] for row in self.db.execute("PRAGMA table_info(patients)")}
+            if "communication_channel" not in cols:
+                self.db.execute("ALTER TABLE patients ADD COLUMN communication_channel TEXT")
+                self.db.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self.db.close()
 
     def close(self) -> None:
         with self._lock:
@@ -105,7 +121,9 @@ class ClinicStore:
     # ---------- patients ----------
 
     def create_patient(self, home_clinic_id: str, payload: dict) -> Patient:
-        if not isinstance(payload, dict) or set(payload) != {"patient_ref", "full_name", "birth_date", "sex", "contact"}:
+        required = {"patient_ref", "full_name", "birth_date", "sex", "contact"}
+        allowed = required | {"communication_channel"}
+        if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - allowed:
             raise ClinicError("Invalid patient fields")
         if home_clinic_id not in self.network.clinics or not self.network.clinics[home_clinic_id]["active"]:
             raise ClinicError("Unknown or inactive home clinic")
@@ -118,14 +136,22 @@ class ClinicStore:
         if sex is not None and sex not in {"M", "F", "X"}:
             raise ClinicError("Invalid sex")
         contact = _text(payload["contact"], "contact", max_length=256, required=False)
+        channel = payload.get("communication_channel")
+        if channel is not None:
+            channel = _text(channel, "communication_channel", max_length=128, required=False)
         stamp = now()
         patient_id = uuid.uuid4().hex
         with self._lock, self.db:
             if self.db.execute("SELECT 1 FROM patients WHERE patient_ref=?", (ref,)).fetchone():
                 raise ConflictError("patient_ref already registered")
-            self.db.execute("INSERT INTO patients VALUES(?,?,?,?,?,?,?,?,?,?)",
-                            (patient_id, home_clinic_id, ref, full_name, birth_date, sex, contact, "active", stamp, stamp))
-            self._event(patient_id, "patient_registered", home_clinic_id, {"home_clinic_id": home_clinic_id})
+            self.db.execute(
+                "INSERT INTO patients "
+                "(id, home_clinic_id, patient_ref, full_name, birth_date, sex, contact, communication_channel, status, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (patient_id, home_clinic_id, ref, full_name, birth_date, sex, contact, channel, "active", stamp, stamp),
+            )
+            self._event(patient_id, "patient_registered", home_clinic_id,
+                        {"home_clinic_id": home_clinic_id, "communication_channel": channel})
             return self.get_patient(patient_id)
 
     def get_patient(self, patient_id: str) -> Patient | None:
