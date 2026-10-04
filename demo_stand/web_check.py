@@ -30,14 +30,15 @@ MAX_DIFF = 0.01
 
 # Pixel comparison with the prototype. A screen leaves this list when it moves to service data (tasks 04-07).
 COMPARE = [s for s in SCREENS if s[1] not in {"services", "home", "plan", "appointments", "inbox", "case", "scheduling",
-                                             "imaging", "reading", "study", "review"}]
+                                             "imaging", "reading", "study", "review", "rules", "analytics", "doctor"}]
 # Intentional differences. Masked areas are painted over in both screenshots before comparing.
 MASKS = [".brand small"]  # sidebar subtitle: «Демо-стенд» instead of «Прототип · версия 2»
 INTENTIONAL = [
     "подпись под названием в боковой панели: «Демо-стенд» (маска .brand small)",
     "«Карта сервисов»: строки состояния сервисов и пометки «демо-модуль» (экран не сравнивается)",
     "имена из сессии: в журнале и новых записях вместо текста прототипа (на стартовых экранах совпадают)",
-    "экраны снимков и создания маршрута: действия выключены до заданий 05 и 07, поэтому их не сравниваем",
+    "экраны снимков работают на сервисе снимков: настоящие срезы вместо схем, загрузка ZIP с DICOM, без рентгена (не сравниваются)",
+    "создание маршрута выключено до задания 07",
 ]
 CSP_PROBE = ("window.__mmCsp = [];"
              "document.addEventListener('securitypolicyviolation', e => window.__mmCsp.push(e.violatedDirective + ' ' + e.blockedURI));")
@@ -174,6 +175,51 @@ def check_two_windows(browser) -> list[str]:
     return failures
 
 
+def check_imaging(browser) -> list[str]:
+    """Patient uploads a kit CT as a file, the doctor confirms it on real slices, the patient sees the result."""
+    archive = Path(env("DEMO_STATE_DIR")) / "kit" / "upload-ct-nodule.zip"
+    context = browser.new_context(viewport={"width": 1280, "height": 900})
+    patient, doctor = context.new_page(), context.new_page()
+    patient_errors, doctor_errors = watch(patient), watch(doctor)
+    failures = []
+    patient.goto(APP + "/#/patient/imaging")
+    wait_ready(patient)
+    patient.click("[data-action=uploadOpen]")
+    if "Рентген" in patient.inner_text("#upKind"):
+        failures.append("в окне загрузки остался рентген")
+    patient.click("[data-action=uploadKit]")
+    patient.wait_for_selector("[data-action=uploadKitSend]")
+    patient.set_input_files("#upFile", str(archive))
+    patient.select_option("#upKind", "ct_general")
+    patient.check("#upConsent")
+    patient.click("[data-action=upload]")
+    patient.wait_for_selector("#view .panel:has-text('Ждёт врача')", timeout=70000)
+    doctor.goto(APP + "/#/doctor/reading")
+    doctor.wait_for_selector("[data-action=studyOpen]")
+    doctor.click("[data-action=studyOpen] >> nth=0")
+    doctor.wait_for_selector("img.studyimg[src^='blob:']")
+    if "Демо-сценарий: признак задан заранее" not in doctor.inner_text("#view"):
+        failures.append("нет плашки демо-сценария")
+    if "Оценка модели" in doctor.inner_text("#view"):
+        failures.append("в демо-сценарии видна оценка модели")
+    doctor.click("[data-action=studyStep][data-step='1']")
+    doctor.wait_for_selector("img.studyimg[src^='blob:']")
+    doctor.click("[data-action=studyConfirm]")
+    doctor.wait_for_selector("#view:has-text('Шаг по правилу')", timeout=20000)
+    patient.reload()
+    patient.wait_for_selector("#view .panel:has-text('Подтверждено врачом') img.studyimg[src^='blob:']", timeout=20000)
+    text = patient.inner_text("#view")
+    for word in ("оценка", "0.0", "1.2.826"):
+        if word in text:
+            failures.append(f"пациенту видно «{word}»")
+    if not patient.query_selector("[data-action=pathChoose]"):
+        failures.append("у пациента нет кнопки записи")
+    if patient_errors or doctor_errors:
+        failures.append("ошибки в консоли: " + "; ".join(patient_errors + doctor_errors))
+    context.close()
+    return failures
+
+
 def masked(image: Image.Image, boxes: list[tuple[int, int, int, int]]) -> Image.Image:
     image = image.convert("RGB")
     draw = ImageDraw.Draw(image)
@@ -235,7 +281,8 @@ def main() -> int:
             checks = [("Все экраны во всех ролях без ошибок консоли и CSP; адрес переживает обновление, «назад» и переходы с карты сервисов", check_screens),
                       ("Нет горизонтальной прокрутки при 390, 820, 1280 и 1680 px", check_widths),
                       ("Сквозной сценарий: запись → итог врача и рецепт → второй этап → бронь в аптеке", check_scenario),
-                      ("Два окна с разными ролями не мешают друг другу", check_two_windows)]
+                      ("Два окна с разными ролями не мешают друг другу", check_two_windows),
+                      ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging)]
             for title, check in checks:
                 failures = check(browser)
                 results.append(not failures)

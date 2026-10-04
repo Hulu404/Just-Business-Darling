@@ -1,7 +1,7 @@
 import { notify, title } from './domain.js';
 import { icon } from './icons.js';
-import { doctor, study } from './pages/doctor.js';
-import { imaging, messages, pharmacy, result } from './pages/patient.js';
+import { doctor } from './pages/doctor.js';
+import { messages, pharmacy, result } from './pages/patient.js';
 import { services } from './pages/services.js';
 import { requests, rules, who } from './pages/staff.js';
 
@@ -153,14 +153,6 @@ export const DEMO = {
   }
 };
 
-/* Схемы вместо снимков: условные рисунки, не медицинские изображения */
-export const SCHEME = {
-  xray:(m, tag) => `<svg viewBox="0 0 360 300" role="img" aria-label="Схема рентгенограммы грудной клетки"><rect width="360" height="300" rx="12" fill="#0b1a1f"/><path d="M58 300C58 180 84 86 150 62c10-4 20-14 30-14s20 10 30 14c66 24 92 118 92 238z" fill="#1a3038"/><path d="M166 86c-44 6-70 62-70 142 0 30 44 34 62 16 8-8 8-158 8-158z" fill="#0d2026"/><path d="M194 86c44 6 70 62 70 142 0 30-30 34-46 22-22-16-24-164-24-164z" fill="#0d2026"/><path d="M176 150c22-6 52 14 54 52 2 30-30 46-54 42z" fill="#27444d"/><rect x="174" y="52" width="12" height="236" rx="6" fill="#2c4d57"/><g fill="none" stroke="#3a6470" stroke-width="2" stroke-linecap="round" opacity=".75"><path d="M100 128q34-18 70-8M98 156q36-18 72-8M98 184q36-16 72-8M100 212q34-14 70-8"/><path d="M260 128q-34-18-70-8M262 156q-36-18-72-8M262 184q-36-16-72-8M260 212q-34-14-70-8"/><path d="M90 92q44-14 84 0M270 92q-44-14-84 0"/></g>${m ? `<ellipse cx="124" cy="214" rx="24" ry="19" fill="#b7cdd1" opacity=".32"/><rect x="92" y="186" width="64" height="56" rx="9" fill="none" stroke="#19d3b6" stroke-width="2.5"/>${tag ? `<text x="92" y="178" fill="#19d3b6" font-size="12" font-weight="700">ИИ · ${tag}</text>` : ''}` : ''}<text x="20" y="34" fill="#7fa3ab" font-size="15" font-weight="700">R</text></svg>`,
-  ct:(m, tag) => `<svg viewBox="0 0 360 300" role="img" aria-label="Схема среза КТ грудной клетки"><rect width="360" height="300" rx="12" fill="#0b1a1f"/><ellipse cx="180" cy="152" rx="150" ry="112" fill="#213a42"/><g id="ctLungs"><path d="M168 70c-60-8-104 34-104 90 0 46 40 70 84 62 18-4 22-40 20-152z" fill="#060f12"/><path d="M192 70c60-8 104 34 104 90 0 46-40 70-84 62-18-4-22-40-20-152z" fill="#060f12"/><g fill="#4f747e"><circle cx="118" cy="128" r="3"/><circle cx="134" cy="160" r="2.5"/><circle cx="236" cy="134" r="3"/><circle cx="226" cy="170" r="2.5"/><circle cx="104" cy="170" r="2"/><circle cx="256" cy="176" r="2"/></g></g><path d="M168 78c16-10 40-6 46 22 6 30-6 62-34 64-16 0-16-60-12-86z" fill="#35555f"/><circle cx="180" cy="228" r="19" fill="#a9c1c6"/><circle cx="180" cy="230" r="6" fill="#213a42"/>${m ? `<g id="ctMark"><circle cx="112" cy="196" r="6" fill="#dbe9eb"/><circle cx="112" cy="196" r="17" fill="none" stroke="#19d3b6" stroke-width="2.5"/>${tag ? `<text x="134" y="200" fill="#19d3b6" font-size="12" font-weight="700">ИИ · ${tag}</text>` : ''}</g>` : ''}<text x="20" y="34" fill="#7fa3ab" font-size="15" font-weight="700">R</text></svg>`,
-  mg:(m, tag) => `<svg viewBox="0 0 360 300" role="img" aria-label="Схема маммограммы в косой проекции"><rect width="360" height="300" rx="12" fill="#0b1a1f"/><path d="M24 30c96 6 142 52 142 120s-46 114-142 120z" fill="#1d363e"/><path d="M336 30c-96 6-142 52-142 120s46 114 142 120z" fill="#1d363e"/><g fill="#3c5e68" opacity=".7"><ellipse cx="74" cy="140" rx="34" ry="52"/><ellipse cx="286" cy="150" rx="34" ry="52"/></g><g fill="#587c86" opacity=".6"><ellipse cx="62" cy="120" rx="16" ry="24"/><ellipse cx="296" cy="170" rx="18" ry="22"/></g>${m ? `<circle cx="276" cy="104" r="9" fill="#cfe0e3" opacity=".85"/><circle cx="276" cy="104" r="21" fill="none" stroke="#19d3b6" stroke-width="2.5"/>${tag ? `<text x="212" y="74" fill="#19d3b6" font-size="12" font-weight="700">ИИ · ${tag}</text>` : ''}` : ''}<text x="24" y="290" fill="#7fa3ab" font-size="13" font-weight="700">R-MLO</text><text x="290" y="290" fill="#7fa3ab" font-size="13" font-weight="700">L-MLO</text></svg>`,
-  mri:(m, tag) => `<svg viewBox="0 0 360 300" role="img" aria-label="Схема МРТ коленного сустава"><rect width="360" height="300" rx="12" fill="#0b1a1f"/><path d="M120 0h112v104c0 44-28 62-58 62s-54-22-54-62z" fill="#42626c"/><path d="M112 196c20-10 112-10 132 0v104H112z" fill="#42626c"/><ellipse cx="86" cy="118" rx="15" ry="32" fill="#39565f"/><path d="M118 174l34 9-34 9z" fill="#111f24"/><path d="M242 174l-34 9 34 9z" fill="#111f24"/>${m ? `<path d="M240 180l-22 5" stroke="#dbe9eb" stroke-width="2" stroke-linecap="round"/><circle cx="228" cy="183" r="19" fill="none" stroke="#19d3b6" stroke-width="2.5"/>${tag ? `<text x="254" y="188" fill="#19d3b6" font-size="12" font-weight="700">ИИ · ${tag}</text>` : ''}` : ''}<text x="20" y="34" fill="#7fa3ab" font-size="13" font-weight="700">Сагиттальный срез</text></svg>`
-};
-
 /* ---------- Аптека ---------- */
 export const PHARMACIES = [
   {id:'ph0', name:'Аптека на первом этаже клиники', addr:'Центральный филиал', dist:'в клинике'},
@@ -198,7 +190,7 @@ export const TRIGGERS = [
 export const scenarios = {
   symptoms:{title:'Что-то беспокоит', icon:'spark', desc:'Опишите симптомы и получите понятный следующий шаг.'},
   document:{title:'Есть анализ или выписка', icon:'doc', desc:'Разберём документ и подготовим вас к обращению.'},
-  imaging:{title:'Есть снимок или заключение', icon:'scan', desc:'Загрузите КТ, МРТ, маммографию или рентген. Врач подтвердит заключение, и мы объясним его простыми словами.', direct:'upload'},
+  imaging:{title:'Есть снимок или заключение', icon:'scan', desc:'Загрузите КТ, МРТ или маммографию. Врач подтвердит заключение, и мы объясним его простыми словами.', direct:'upload'},
   noslots:{title:'Не получается записаться', icon:'clock', desc:'Покажем возможные действия, если нужный врач недоступен.'},
   after:{title:'После приёма', icon:'after', desc:'Соберём назначения и дальнейшие шаги в один план.'},
   meds:{title:'Нужны лекарства', icon:'pharmacy', desc:'Товары без рецепта с выдачей в клинике и бронь рецептурных препаратов в аптеках-партнёрах.', direct:'pharmacy'}

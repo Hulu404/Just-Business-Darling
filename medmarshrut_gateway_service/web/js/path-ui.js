@@ -3,6 +3,7 @@ import { api } from './api.js';
 import { state, sessions } from './state.js';
 import { badge, btn, closeModal, errorNote, go, loadingCards, modalHead, navBtn, openModal, safe, toast } from './ui.js';
 import { render } from './shell.js';
+import { demoSource, manualStudiesBlock } from './imaging-ui.js';
 
 const routePages = new Set(['home', 'plan', 'appointments', 'inbox', 'case', 'scheduling']);
 export const isPathPage = () => routePages.has(state.page) && (state.role === 'patient' || state.role === 'staff' || state.role === 'doctor');
@@ -128,7 +129,7 @@ export function pathInbox(){
   const need = path.items.filter(staffNeed).length;
   const manual = path.items.filter(e => e.status === 'manual_review').length;
   return intro + `<div class="grid four" style="margin-bottom:18px"><div class="card"><div class="metric">${need}</div><span class="muted">ждут действия</span></div><div class="card"><div class="metric">${path.items.filter(e => current(e)?.status === 'open').length}</div><span class="muted">пациент не записан</span></div><div class="card"><div class="metric">${manual}</div><span class="muted">ждут решения врача</span></div><div class="card"><div class="metric">${path.items.filter(e => e.status === 'paused').length}</div><span class="muted">отложено</span></div></div>
-    <div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Исследование</th><th>Следующий шаг</th><th>Что мешает</th><th>Статус</th><th></th></tr></thead><tbody>${path.items.map(staffRow).join('') || '<tr><td colspan="6">Обращений пока нет.</td></tr>'}</tbody></table></div>`;
+    <div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Исследование</th><th>Следующий шаг</th><th>Что мешает</th><th>Статус</th><th></th></tr></thead><tbody>${path.items.map(staffRow).join('') || '<tr><td colspan="6">Обращений пока нет.</td></tr>'}</tbody></table></div>${manualStudiesBlock()}`;
 }
 
 function staffActions(e){
@@ -159,7 +160,7 @@ export function pathCase(){
   if (!e) return intro + empty('Обращений пока нет');
   const report = e.source_report || {};
   return intro + `<div class="twocol"><div class="stack"><div class="panel"><h3>Заключение по исследованию</h3><p>${safe(report.conclusion)}</p>
-      <dl class="kv"><dt>Исследование</dt><dd>${safe(report.study_type)}</dd><dt>Область</dt><dd>${safe(report.anatomy)}</dd><dt>Протокол</dt><dd>${safe(report.protocol_name)}</dd><dt>Код находки</dt><dd>${safe(report.finding_code)}</dd><dt>Подтвердил</dt><dd>${safe(report.physician_id)} · ${safe(fmt(report.confirmed_at))}</dd><dt>Источник черновика</dt><dd>${safe(report.source_model)}</dd></dl></div>
+      <dl class="kv"><dt>Исследование</dt><dd>${safe(report.study_type)}</dd><dt>Область</dt><dd>${safe(report.anatomy)}</dd><dt>Протокол</dt><dd>${safe(report.protocol_name)}</dd><dt>Код находки</dt><dd>${safe(report.finding_code)}</dd><dt>Подтвердил</dt><dd>${safe(report.physician_id)} · ${safe(fmt(report.confirmed_at))}</dd><dt>Источник черновика</dt><dd>${safe(report.source_model)}</dd></dl>${demoSource(report.source_model)}</div>
       <div class="panel"><h3>Рекомендация следующего шага</h3>${e.reason ? `<div class="note warn">${safe(e.reason)}</div>` : ''}<div class="tlgroup">План</div>${e.steps.map(s => `<div class="rowline"><div><strong>${stepTitle(s)}</strong><div class="meta">${safe(s.decision_source)} · ${safe(fmt(s.due_at))}</div></div>${badge(statusName(s.status), tone(s.status))}</div>`).join('') || '<p>План уточняет врач.</p>'}</div></div>
       <div class="stack"><div class="panel"><h3>Что сделать сейчас</h3><p>${safe(staffReason(e))}</p><div class="actions">${staffActions(e)}</div></div>
       ${path.requests.filter(r => r.episode_id === e.id).length ? `<div class="panel"><h3>Обращения пациента</h3>${path.requests.filter(r => r.episode_id === e.id).map(r => `<div class="rowline"><div><strong>${safe(r.intent)}</strong><div class="meta">${safe(fmt(r.created_at))}</div><p>${safe(r.body)}</p></div></div>`).join('')}</div>` : ''}

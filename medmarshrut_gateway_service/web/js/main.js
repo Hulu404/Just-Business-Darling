@@ -5,14 +5,18 @@ import { render, renderBanner } from './shell.js';
 import { freshState, health, hooks, sessions, setState, state, ui } from './state.js';
 import { installPathActions, isPathPage, pathAppointments, pathCase, pathHome, pathInbox, pathPlan, pathScheduling, refreshPath } from './path-ui.js';
 import { installPathExtra, pathAnalytics, pathDoctor, pathRules, refreshPathExtra } from './path-extra.js';
+import { imagingPage, installImagingActions, isImagingListPage, readingPage, refreshImaging, studyPage } from './imaging-ui.js';
 
 const ROLES = ['patient', 'staff', 'doctor'];
 const HEALTH_EVERY = 15000;
 Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointments,
                       inbox:pathInbox, case:pathCase, scheduling:pathScheduling,
-                      doctor:pathDoctor, rules:pathRules, analytics:pathAnalytics});
+                      doctor:pathDoctor, rules:pathRules, analytics:pathAnalytics,
+                      imaging:imagingPage, reading:readingPage, study:studyPage});
 installPathActions(ACTIONS);
 installPathExtra(ACTIONS);
+installImagingActions(ACTIONS);
+const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); };
 const sessionRequests = {};
 
 function parseHash(){
@@ -48,13 +52,13 @@ function applyRoute(){
   }
   render();
   window.scrollTo(0, 0);
-  ensureSession(state.role).then(() => { refreshPath(); refreshPathExtra(); });
+  ensureSession(state.role).then(refreshData);
 }
 
 /* go() из прототипа меняет экран сразу; адрес и сессия догоняют здесь */
 hooks.navigate = () => {
   if (location.hash !== hashOf()) history.pushState(null, '', hashOf());
-  ensureSession(state.role).then(() => { refreshPath(); refreshPathExtra(); });
+  ensureSession(state.role).then(refreshData);
 };
 
 let lastHealth = '';
@@ -80,8 +84,9 @@ if (start) Object.assign(state, start);
 else history.replaceState(null, '', hashOf());
 window.addEventListener('popstate', applyRoute);
 render();
-ensureSession(state.role).then(() => { refreshPath(); refreshPathExtra(); });
+ensureSession(state.role).then(refreshData);
 refreshHealth();
 setInterval(refreshHealth, HEALTH_EVERY);
 setInterval(() => { if (isPathPage()) refreshPath(); }, HEALTH_EVERY);
 setInterval(refreshPathExtra, HEALTH_EVERY);
+setInterval(() => { if (isImagingListPage()) refreshImaging(); }, HEALTH_EVERY);

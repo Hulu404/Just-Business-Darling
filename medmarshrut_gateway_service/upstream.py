@@ -110,11 +110,11 @@ class Upstream:
 
     def request(self, service: str, method: str, route: str, *, body: dict | None = None, raw: bytes | None = None,
                 content_type: str | None = None, auth: str | tuple[str, str] | None = None,
-                timeout: float | None = None) -> tuple[int, object]:
+                timeout: float | None = None, headers: dict[str, str] | None = None) -> tuple[int, object]:
         """One call. Returns (status, JSON or bytes) for any HTTP answer; a dropped connection raises 502/504."""
         name = SERVICE_NAMES[service]
         data = raw if raw is not None else (json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None)
-        headers = {}
+        headers = dict(headers or {})
         if data is not None:
             headers["Content-Type"] = content_type or "application/json"
         if auth in self._bearer:

@@ -1,8 +1,8 @@
 import { PAGES } from './actions.js';
 import { awaitingOutcome, queueInfo, waitingOn } from './domain.js';
 import { icon } from './icons.js';
-import { doctor, reading, study } from './pages/doctor.js';
-import { appointments, documents, home, imaging, intake, messages, pharmacy, plan, result, review } from './pages/patient.js';
+import { doctor } from './pages/doctor.js';
+import { appointments, documents, home, intake, messages, pharmacy, plan, result, review } from './pages/patient.js';
 import { services } from './pages/services.js';
 import { analytics, comms, inbox, partners, pharmacyAdmin, requests, rules, scheduling } from './pages/staff.js';
 import { health, sessions, state, ui } from './state.js';
@@ -27,7 +27,7 @@ export function navCount(id){
     if (id === 'pharmacyAdmin') return state.orders.filter(o => o.status === 'Собирается').length;
   }
   if (state.role === 'doctor'){
-    if (id === 'reading') return state.studies.filter(s => s.status === 'awaiting').length;
+    if (id === 'reading') return state.readingCount || 0;
     if (id === 'doctor') return state.doctorVisitCount || 0;
     if (id === 'requests') return state.requests.filter(r => r.status === 'open' && waitingOn(r) === 'doctor').length;
   }

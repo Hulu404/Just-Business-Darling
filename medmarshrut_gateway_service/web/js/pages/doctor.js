@@ -1,51 +1,11 @@
-import { DEMO, NEXT, SCHEME, SERVICES, partnerOnly } from '../demo-data.js';
-import { awaitingOutcome, ep, highlight, live, slotLine, stepOf, studyOf, title } from '../domain.js';
-import { nextStepLabel } from './staff.js';
+import { DEMO, NEXT, SERVICES, partnerOnly } from '../demo-data.js';
+import { awaitingOutcome, ep, live, slotLine, stepOf, studyOf, title } from '../domain.js';
 import { state } from '../state.js';
-import { badge, btn, lc, modalHead, navBtn, openModal, plural, safe } from '../ui.js';
+import { badge, btn, lc, modalHead, openModal, safe } from '../ui.js';
 
 /* =====================================================================
-   Экраны врача и карта сервисов
+   Экраны врача (снимки — в imaging-ui.js)
    ===================================================================== */
-export const studyBadge = st => ({processing:badge('Обрабатывается', 'blue'), awaiting:badge('Ждёт проверки', 'orange'), confirmed:badge('Подтверждено врачом'), manual:badge('Ручное описание', 'gray')}[st.status]);
-export const aiSummary = st => { const f = DEMO[st.kind].findings[0]; return f ? `ИИ: ${lc(f.label)}, ${safe(f.place)}. Оценка модели ${safe(f.conf)}` : 'ИИ: находок выше порога нет'; };
-
-export function reading(){
-  const wait = state.studies.filter(s => s.status === 'awaiting');
-  const done = state.studies.filter(s => s.status === 'confirmed');
-  return `<div class="pagehead"><div><div class="eyebrow">Сервис «Что на снимке?»</div><h1>Черновики ИИ на проверку</h1><p>ИИ готовит черновик заключения, врач его подтверждает. До этого ни пациент, ни координатор результата не видят.</p></div></div>
-    <div class="grid three" style="margin-bottom:18px"><div class="card"><div class="metric">${wait.length}</div><span class="muted">${plural(wait.length, ['ждёт', 'ждут', 'ждут'])} проверки</span></div><div class="card"><div class="metric">${done.length}</div><span class="muted">подтверждено</span></div><div class="card"><div class="metric">${done.filter(s => s.edited).length}</div><span class="muted">черновиков исправлено врачом</span></div></div>
-    <div class="sectionhead" style="margin-top:8px"><h2>Ждут проверки</h2></div>
-    ${wait.length ? `<div class="grid two">${wait.map(st => `<div class="card">${studyBadge(st)}<h3 style="margin-top:13px">${safe(st.patient)}</h3><p>${DEMO[st.kind].title} · ${lc(safe(st.date))}<br>${safe(aiSummary(st))}</p><div class="actions">${btn('Открыть снимок', 'studyOpen', 'small', {id:st.id})}</div></div>`).join('')}</div>` : '<div class="panel empty"><h3>Всё проверено</h3><p>Новые исследования появятся здесь, когда придут из РИС или от пациента.</p></div>'}
-    <div class="sectionhead"><h2>Подтверждённые</h2></div>
-    <div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Исследование</th><th>Находка</th><th>Что дальше</th><th></th></tr></thead><tbody>
-      ${done.map(st => `<tr><td><strong>${safe(st.patient)}</strong></td><td>${DEMO[st.kind].title}<small>${safe(st.date)}</small></td><td>${DEMO[st.kind].findings[0] ? DEMO[st.kind].findings[0].label : 'Изменений не выявлено'}${st.edited ? '<small>черновик исправлен</small>' : ''}</td><td>Пока недоступно на стенде</td><td>${btn('Открыть', 'studyOpen', 'secondary small', {id:st.id})}</td></tr>`).join('')}
-    </tbody></table></div>`;
-}
-
-export function study(){
-  const st = state.studies.find(x => x.id === state.sel.study) || state.studies[0];
-  const d = DEMO[st.kind], f = d.findings[0];
-  const canEdit = state.role === 'doctor' && st.status === 'awaiting';
-  const e = null; // Демо-исследование не ссылается на настоящий эпизод до задания 05.
-  const back = state.role === 'doctor' ? navBtn('← К списку', 'reading', 'secondary') : state.role === 'staff' ? (e ? `<button class="btn secondary" data-case="${safe(e.id)}">← К обращению</button>` : navBtn('← К обращениям', 'inbox', 'secondary')) : navBtn('← Назад', 'imaging', 'secondary');
-  const under = d.scheme === 'ct' && f
-    ? `<input type="range" id="slice" min="130" max="154" value="142" aria-label="Номер среза"><div class="cap"><span id="sliceLabel">Срез 142 из 310</span><span>Находка на срезах 139–145</span></div><div class="cap"><span>${d.files}</span><span>Схема, не медицинское изображение</span></div>`
-    : `<div class="cap"><span>${d.files}</span><span>Схема, не медицинское изображение</span></div>`;
-  const text = st.status === 'confirmed' ? st.conclusion : d.draft;
-  return `<div class="pagehead"><div><div class="eyebrow">Сервис «Что на снимке?»</div><h1>${safe(st.patient)}</h1><p>${d.title} · ${lc(safe(st.date))} · ${safe(st.source)}</p></div><div class="actions">${studyBadge(st)}${back}</div></div>
-    <div class="twocol study"><div class="stack"><div class="viewer">${SCHEME[d.scheme](!!f, f ? f.conf : '')}${under}</div>
-        <div class="note">Модель отмечает только те находки, на которые её проверяли. ${d.modality === 'mg' ? 'Категорию BI-RADS сервис не присваивает: её указывает врач.' : 'Если протокол или область не подходят модели, исследование сразу уходит на ручное описание.'}</div></div>
-      <div class="stack"><div class="panel"><h3>Находки ИИ</h3>
-          ${d.findings.length ? d.findings.map(x => `<div class="finding"><span class="dot now"></span><span><strong>${safe(x.label)}</strong><small>${safe(x.place)}</small><small>Оценка модели: ${safe(x.conf)}</small></span></div>`).join('') : '<p>Находок выше порога нет. Такое исследование всё равно смотрит врач.</p>'}
-          <dl class="kv" style="margin-top:14px"><dt>Черновик готовил</dt><dd>${st.uploaded ? 'ИИ-модель сервиса, снимок загрузил пациент' : 'ИИ-сервис «Третье мнение», демо-интеграция'}</dd><dt>Файлы</dt><dd>${d.files}${st.file ? ' · ' + safe(st.file) : ''}</dd><dt>Проверка DICOM</dt><dd>Серия полная, протокол подходит модели</dd></dl></div>
-        <div class="panel"><h3>${canEdit ? 'Черновик заключения' : 'Заключение'}</h3>
-          ${canEdit ? `<div class="field"><textarea id="draft" style="min-height:190px" aria-label="Текст заключения" disabled>${safe(d.draft)}</textarea><small>Демо-черновик. Подтверждение подключится в задании 05.</small></div><div class="actions"><button class="btn" disabled>Подтвердить заключение</button><span class="muted">Пока недоступно на стенде</span></div>`
-            : st.status === 'confirmed' ? `<div class="quote">${highlight(text)}</div><p style="margin:12px 0 0">${safe(st.confirmedBy)}, подтверждено ${safe(st.confirmedAt)}${st.edited ? ' · черновик ИИ исправлен' : ''}</p>${e && state.role !== 'patient' ? `<div class="actions"><button class="btn secondary small" data-case="${safe(e.id)}">Открыть обращение</button></div>` : st.noRoute ? '<p style="margin:10px 0 0">Маршрут не нужен: пациент получил результат и напоминание через 12 месяцев.</p>' : ''}`
-            : `<p style="margin:0">${st.status === 'manual' ? 'Врач описывает исследование без черновика ИИ.' : 'Заключение появится после проверки врачом.'}</p>`}
-        </div></div></div>`;
-}
-
 export function doctor(){
   const visits = state.episodes.flatMap(e => e.steps.filter(s => s.status === 'confirmed' && s.slot && !s.slot.partner).map(s => [e, s]));
   const today = visits.filter(([, s]) => s.slot.date === 'Сегодня'), later = visits.filter(([, s]) => s.slot.date !== 'Сегодня');

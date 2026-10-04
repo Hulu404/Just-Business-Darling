@@ -1,7 +1,7 @@
 import { DEMO, PARTNERS, PHARMACIES, RULES, SERVICES, TRIGGERS, scenarios, slotsFor } from '../demo-data.js';
 import { analyze, byKey, currentStep, ep, highlight, live, queueInfo, refKey, slotFull, slotLine, studyOf, title, waitingOn, whereBadge } from '../domain.js';
 import { icon } from '../icons.js';
-import { imaging, intake } from './patient.js';
+import { intake } from './patient.js';
 import { staffFirstName, staffName, state } from '../state.js';
 import { badge, btn, lc, modalHead, navBtn, openModal, plural, rub, safe } from '../ui.js';
 

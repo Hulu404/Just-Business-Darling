@@ -41,7 +41,8 @@ def load_json(path: Path):
 
 
 def call(method: str, url: str, body: dict | None = None, *, token: str | None = None,
-         secret: str | None = None, raw: bytes | None = None, headers: dict | None = None) -> tuple[int, object]:
+         secret: str | None = None, raw: bytes | None = None, headers: dict | None = None,
+         timeout: float = 15) -> tuple[int, object]:
     """Send one request. Returns (status, parsed JSON or bytes). A dropped connection is a service error."""
     data = raw if raw is not None else (json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None)
     sent = dict(headers or {})
@@ -56,7 +57,7 @@ def call(method: str, url: str, body: dict | None = None, *, token: str | None =
                                                         hashlib.sha256).hexdigest()
     request = Request(url, data=data, headers=sent, method=method)
     try:
-        with urlopen(request, timeout=15) as response:
+        with urlopen(request, timeout=timeout) as response:
             status, payload, kind = response.status, response.read(), response.headers.get("Content-Type", "")
     except HTTPError as exc:
         status, payload, kind = exc.code, exc.read(), exc.headers.get("Content-Type", "")
@@ -72,6 +73,31 @@ def expect(status: int, body: object, codes: set[int] | int, what: str) -> objec
     if status not in codes:
         raise StandError(f"{what}: ожидали {sorted(codes)}, получили {status} {body}")
     return body
+
+
+# ---------- gateway ----------
+
+class Gateway:
+    """A demo-role window of the gateway: the session cookie and X-MM-Role, like the browser sends them."""
+
+    def __init__(self, role: str, **extra):
+        self.role = role
+        request = Request(GATEWAY + "/api/session", data=json.dumps({"role": role, **extra}).encode("utf-8"),
+                          headers={"Content-Type": "application/json", "X-MM-Role": role}, method="POST")
+        try:
+            with urlopen(request, timeout=15) as response:
+                self.cookie = (response.headers.get("Set-Cookie") or "").split(";", 1)[0]
+        except HTTPError as exc:
+            raise StandError(f"Сессия «{role}» в шлюзе: {exc.code} {exc.read().decode('utf-8', 'replace')}") from None
+        except (URLError, OSError) as exc:
+            raise StandError(f"Шлюз не ответил ({exc}). Проверьте, что стенд запущен.") from None
+
+    def call(self, method: str, route: str, body: dict | None = None, *, raw: bytes | None = None,
+             content_type: str | None = None) -> tuple[int, object]:
+        headers = {"X-MM-Role": self.role, "Cookie": self.cookie}
+        if content_type:
+            headers["Content-Type"] = content_type
+        return call(method, GATEWAY + route, body, raw=raw, headers=headers, timeout=70)
 
 
 # ---------- image service ----------

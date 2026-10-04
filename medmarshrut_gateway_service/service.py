@@ -5,20 +5,31 @@ import json
 import os
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from catalog import STUDY_NAMES
 from errors import GatewayError
+from imaging import (MAX_ARCHIVE, MAX_CONCLUSION, MODALITY_TYPES, TASKS, build_manifest, confirm_body,
+                     conclusion_templates, dicom_to_png, images, is_demo, place, reason_text as study_reason)
 from sessions import ROLES, People, Session, SessionStore, cookie_name
 from store import GatewayStore, StoreConflict, StoreError
-from upstream import Upstream, patient_ref, service_url, text
-from views import patient_episode, staff_episode
+from upstream import Upstream, human_error, patient_ref, service_url, text
+from views import patient_episode, reason_text, staff_episode
 
 MAX_BODY = 32 * 1024
+UPLOAD_TIMEOUT = 60  # the image service waits up to 30 s for inference
+UNAVAILABLE = "Недоступно: сервис снимков перезапущен"
+NOT_ROUTED = "Заключение подтверждено, но не дошло до сервиса маршрута"
+DEFAULT_EXPLANATION = {"seen": "Заключение готово.", "means": "Врач объяснит результат на приёме"}
+PATIENT_STATUS = {"processing": "processing", "awaiting_physician": "awaiting", "manual_review": "manual",
+                  "test_only": "manual", "confirmed": "confirmed"}
 WEB_DIR = Path(__file__).resolve().parent / "web"
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
@@ -52,6 +63,7 @@ class Config:
     port: int
     db_dsn: str = ""
     db_schema: str = ""
+    conclusions_path: Path | None = None
 
 
 def load_config(env: dict[str, str]) -> Config:
@@ -90,7 +102,15 @@ def load_config(env: dict[str, str]) -> Config:
     return Config(values["REVIEWER_TOKEN"], values["PATH_ADMIN_TOKEN"], secret("PATH_MIS_TOKEN", required=False),
                   values["CLINIC_SHARED_SECRET"], clinic_tokens, home, Path(env["GATEWAY_STATE_DIR"]),
                   Path(env.get("GATEWAY_PEOPLE") or REPO / "demo_stand" / "people.demo.json"), mode, urls, port,
-                  env.get("GATEWAY_DATABASE_URL", ""), env.get("GATEWAY_DB_SCHEMA", ""))
+                  env.get("GATEWAY_DATABASE_URL", ""), env.get("GATEWAY_DB_SCHEMA", ""),
+                  Path(env.get("GATEWAY_CONCLUSIONS") or REPO / "demo_stand" / "conclusions.demo.json"))
+
+
+@dataclass(frozen=True)
+class RawResponse:
+    """A non-JSON answer, such as a PNG preview."""
+    data: bytes
+    content_type: str
 
 
 @dataclass
@@ -102,9 +122,10 @@ class Context:
     cookies: list[str] = field(default_factory=list)
     session_cookie: str | None = None
     query: dict[str, str] = field(default_factory=dict)
+    raw: bytes = b""
 
 
-Handler = Callable[[Context], tuple[int, dict]]
+Handler = Callable[[Context], tuple[int, dict | RawResponse]]
 
 
 class Gateway:
@@ -114,6 +135,10 @@ class Gateway:
         self.people = People(config.people_path)
         self.sessions = SessionStore()
         self.store = store
+        try:  # demo-stand conclusion templates by finding code; with a real model the gateway composes its own
+            self.demo_texts = json.loads(config.conclusions_path.read_text(encoding="utf-8")) if config.conclusions_path else {}
+        except (OSError, ValueError):
+            self.demo_texts = {}
         kwargs = {"timeout": timeout} if timeout else {}
         self.upstream = Upstream(config.urls, reviewer_token=config.reviewer_token,
                                  path_admin_token=config.path_admin_token, path_mis_token=config.path_mis_token,
@@ -143,7 +168,20 @@ class Gateway:
             ("GET", "/api/staff/rules"): self.staff_rules,
             ("POST", "/api/staff/rules/dry-run"): self.staff_rules_dry_run,
             ("GET", "/api/staff/metrics"): self.staff_metrics,
+            ("POST", "/api/patient/studies"): self.patient_upload,
+            ("POST", "/api/staff/studies"): self.staff_upload,
+            ("GET", "/api/demo/studies"): self.demo_studies,
+            ("POST", "/api/demo/studies/{name}/submit"): self.demo_submit,
+            ("GET", "/api/patient/studies"): self.patient_studies,
+            ("GET", "/api/patient/studies/{id}/images/{image}"): self.patient_image,
+            ("GET", "/api/doctor/studies"): self.doctor_studies,
+            ("GET", "/api/doctor/studies/{id}"): self.doctor_study,
+            ("GET", "/api/doctor/studies/{id}/images/{image}"): self.doctor_image,
+            ("POST", "/api/doctor/studies/{id}/confirm"): self.doctor_confirm,
+            ("GET", "/api/staff/studies/manual"): self.staff_manual_studies,
         }
+        # Routes whose body is a ZIP archive, not JSON: type and Content-Length are checked before reading.
+        self.raw_routes: set[tuple[str, str]] = {("POST", "/api/patient/studies"), ("POST", "/api/staff/studies")}
         self.public: set[tuple[str, str]] = {("GET", "/api/health"), ("POST", "/api/session")}
         self.access: dict[tuple[str, str], set[str]] = {
             ("GET", "/api/session"): set(ROLES),
@@ -167,6 +205,17 @@ class Gateway:
             ("GET", "/api/staff/rules"): {"staff", "doctor"},
             ("POST", "/api/staff/rules/dry-run"): {"staff", "doctor"},
             ("GET", "/api/staff/metrics"): {"staff"},
+            ("POST", "/api/patient/studies"): {"patient"},
+            ("POST", "/api/staff/studies"): {"staff"},
+            ("GET", "/api/demo/studies"): {"patient", "staff"},
+            ("POST", "/api/demo/studies/{name}/submit"): {"patient", "staff"},
+            ("GET", "/api/patient/studies"): {"patient"},
+            ("GET", "/api/patient/studies/{id}/images/{image}"): {"patient"},
+            ("GET", "/api/doctor/studies"): {"doctor"},
+            ("GET", "/api/doctor/studies/{id}"): {"doctor"},
+            ("GET", "/api/doctor/studies/{id}/images/{image}"): {"doctor"},
+            ("POST", "/api/doctor/studies/{id}/confirm"): {"doctor"},
+            ("GET", "/api/staff/studies/manual"): {"staff", "doctor"},
         }
 
     def allowed_hosts(self) -> set[str]:
@@ -541,6 +590,292 @@ class Gateway:
         metrics["demo"] = True
         return 200, metrics
 
+    # ---------- studies: image service + study_registry ----------
+
+    def _image_get(self, route: str, **kwargs) -> dict | None:
+        """A JSON read from the image service; None when the job is gone from its memory (404)."""
+        status, body = self.upstream.request("image", "GET", route, **kwargs)
+        if status == 404:
+            return None
+        if status != 200 or not isinstance(body, dict):
+            raise human_error("image", status, body)
+        return body
+
+    def _review(self, job_id: str) -> dict | None:
+        return self._image_get("/v1/review/" + quote(job_id, safe=""), auth="reviewer")
+
+    def _public(self, job_id: str) -> dict | None:
+        return self._image_get("/v1/studies/" + quote(job_id, safe=""))
+
+    def _many(self, fn, ids: list[str]) -> list:
+        if not ids:
+            return []
+        with ThreadPoolExecutor(max_workers=min(8, len(ids))) as pool:
+            return list(pool.map(fn, ids))
+
+    def _registry_row(self, job_id: str, *, owner: Session | None = None) -> dict:
+        row = self.data_store().study(self.config.home_clinic, job_id)
+        if row is None or (owner is not None and row["patient_ref"] != owner.patient_ref):
+            raise GatewayError(404, "not_found", "Такого исследования нет. Обновите список.")
+        return row
+
+    @staticmethod
+    def _title(row: dict, job: dict | None = None) -> str:
+        study = (job or {}).get("study") or {}
+        named = STUDY_NAMES.get((MODALITY_TYPES.get(study.get("modality")), study.get("anatomy")))
+        return named or row.get("title") or TASKS.get(row.get("task"), "Исследование")
+
+    def _episodes_by_report(self) -> dict[str, dict]:
+        return {(raw.get("source_report") or {}).get("source_report_id"): raw for raw in self._episodes()}
+
+    def _staff_patient(self, value: object) -> str:
+        ref = patient_ref(value)
+        card = self.upstream.patient_by_ref(ref)
+        if card is None:
+            raise GatewayError(400, "unknown_patient", f"Пациента «{ref}» нет в сервисе клиники. Проверьте псевдоним.")
+        if card.get("home_clinic_id") != self.config.home_clinic:
+            raise GatewayError(400, "foreign_patient", "Этот пациент наблюдается в другой клинике.")
+        return ref
+
+    def _submit(self, ctx: Context, archive: bytes, task: str, ref: str | None, *, title: str | None = None,
+                kit: str | None = None, consent: bool = False) -> tuple[dict, dict]:
+        """Build the manifest, send the archive, register the job. Returns (public status, registry row)."""
+        manifest = build_manifest(archive, task)
+        status, body = self.upstream.request("image", "POST", "/v1/studies", raw=archive, content_type="application/zip",
+                                             headers={"X-Study-Manifest": json.dumps(manifest)}, timeout=UPLOAD_TIMEOUT)
+        if status in {413, 415}:
+            raise GatewayError(400, "invalid_archive", "Сервис снимков не принял архив: нужен ZIP до 50 МиБ.",
+                               body.get("error") if isinstance(body, dict) else None)
+        # 201, 202, 422, 503 and 504 all mean "job created": the body is its public status.
+        if status not in {201, 202, 422, 503, 504} or not isinstance(body, dict) or not isinstance(body.get("id"), str):
+            raise human_error("image", status, body)
+        row = self.data_store().register_study(body["id"], self.config.home_clinic, ref, task, title or TASKS[task], kit,
+                                               ctx.role, ctx.session.actor,
+                                               datetime.now(timezone.utc) if consent else None)
+        return body, row
+
+    @staticmethod
+    def _consent(value: object) -> None:
+        if value not in {True, "1"}:
+            raise GatewayError(400, "consent_required", "Отметьте согласие на передачу исследования врачу клиники.")
+
+    def patient_upload(self, ctx: Context) -> tuple[int, dict]:
+        self._consent(ctx.query.get("consent"))
+        public, row = self._submit(ctx, ctx.raw, ctx.query.get("task", ""), ctx.session.patient_ref, consent=True)
+        return 201, {"study": {"id": row["job_id"], "title": row["title"], "created_at": row["created_at"],
+                               "status": PATIENT_STATUS.get(public.get("status"), "awaiting")}}
+
+    def staff_upload(self, ctx: Context) -> tuple[int, dict]:
+        ref = self._staff_patient(ctx.query.get("patient_ref"))
+        public, row = self._submit(ctx, ctx.raw, ctx.query.get("task", ""), ref)
+        return 201, {"study": {"id": row["job_id"], "title": row["title"], "status": public.get("status")}}
+
+    def _kit(self) -> dict:
+        try:
+            kit = json.loads((self.config.state_dir / "kit" / "kit.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return kit if isinstance(kit, dict) else {}
+
+    def demo_studies(self, ctx: Context) -> tuple[int, dict]:
+        """Learning archives a person may submit from the window: only the `upload-*` part of the stand kit."""
+        entries = [(name, item) for name, item in self._kit().items() if name.startswith("upload-")]
+        totals: dict[str, int] = {}
+        for _, item in entries:
+            totals[item["title"]] = totals.get(item["title"], 0) + 1
+        seen: dict[str, int] = {}
+        result = []
+        for name, item in entries:
+            seen[item["title"]] = seen.get(item["title"], 0) + 1
+            label = item["title"] + (f", вариант {seen[item['title']]}" if totals[item["title"]] > 1 else "")
+            result.append({"name": name, "title": item["title"], "label": label, "task": item["task"]})
+        return 200, {"studies": result, "demo": True}
+
+    def demo_submit(self, ctx: Context) -> tuple[int, dict]:
+        name = ctx.params["name"]
+        item = self._kit().get(name)
+        if not isinstance(item, dict) or (ctx.role == "patient" and not name.startswith("upload-")):
+            raise GatewayError(404, "not_found", "Такого учебного исследования нет. Обновите список.")
+        try:
+            archive = (self.config.state_dir / "kit" / Path(item["archive"]).name).read_bytes()
+        except (OSError, KeyError, TypeError):
+            raise GatewayError(404, "not_found", "Учебный архив не найден. Перезапустите стенд: python start.py") from None
+        if ctx.role == "patient":
+            self._consent(ctx.body.get("consent"))
+            public, row = self._submit(ctx, archive, item["task"], ctx.session.patient_ref,
+                                       title=item["title"], kit=name, consent=True)
+            return 201, {"study": {"id": row["job_id"], "title": row["title"], "created_at": row["created_at"],
+                                   "status": PATIENT_STATUS.get(public.get("status"), "awaiting")}, "demo": True}
+        ref = self._staff_patient(ctx.body.get("patient_ref"))
+        public, row = self._submit(ctx, archive, item["task"], ref, title=item["title"], kit=name)
+        return 201, {"study": {"id": row["job_id"], "title": row["title"], "status": public.get("status")}, "demo": True}
+
+    def _patient_item(self, row: dict, public: dict | None, episodes: Callable[[], dict]) -> dict:
+        """Before confirmation: status only. After: the physician's text, the approved explanation, the plan step."""
+        item = {"id": row["job_id"], "title": self._title(row), "created_at": row["created_at"]}
+        if public is None:
+            return {**item, "status": "unavailable", "message": UNAVAILABLE}
+        item["status"] = PATIENT_STATUS.get(public.get("status"), "awaiting")
+        if item["status"] != "confirmed":
+            return item
+        job = self._review(row["job_id"])
+        if job is None:
+            return {**item, "status": "unavailable", "message": UNAVAILABLE}
+        confirmation = job.get("confirmation") or {}
+        code = (confirmation.get("routing_payload") or {}).get("finding_code")
+        explanation = self.data_store().explanation(self.config.home_clinic, code) if code else None
+        finding = next((f for f in (job.get("result") or {}).get("findings") or [] if f.get("code") == code), None)
+        item.update(title=self._title(row, job), conclusion=confirmation.get("conclusion"),
+                    confirmed_at=confirmation.get("confirmed_at"), explanation=explanation or DEFAULT_EXPLANATION)
+        if finding:
+            item["image"] = {"sop_uid": (finding.get("localization") or {}).get("sop_uid"),
+                             "label": place(finding, job.get("study"))}
+        raw = episodes().get(row["job_id"])
+        item["episode"] = patient_episode(raw, explanation) if raw else None
+        return item
+
+    def patient_studies(self, ctx: Context) -> tuple[int, dict]:
+        rows = self.data_store().studies(self.config.home_clinic, ctx.session.patient_ref)
+        publics = self._many(self._public, [row["job_id"] for row in rows])
+        cache: dict = {}
+
+        def episodes() -> dict:
+            if "all" not in cache:
+                cache["all"] = {key: raw for key, raw in self._episodes_by_report().items()
+                                if (raw.get("source_report") or {}).get("patient_ref") == ctx.session.patient_ref}
+            return cache["all"]
+        return 200, {"studies": [self._patient_item(row, public, episodes) for row, public in zip(rows, publics)]}
+
+    def _png(self, job_id: str, image: str) -> tuple[int, RawResponse]:
+        if not image.endswith(".png") or len(image) <= 4:
+            raise GatewayError(404, "not_found", "Такого среза нет.")
+        status, body = self.upstream.request("image", "GET", "/v1/review/" + quote(job_id, safe="") + "/images/"
+                                             + quote(image[:-4], safe=""), auth="reviewer")
+        if status == 404:
+            raise GatewayError(404, "not_found", "Срез не найден: исследование недоступно или сервис снимков перезапущен.")
+        if status != 200 or not isinstance(body, bytes):
+            raise human_error("image", status, body)
+        try:
+            return 200, RawResponse(dicom_to_png(body), "image/png")
+        except Exception:
+            raise GatewayError(502, "image_unreadable", "Не удалось показать срез. Откройте другой срез или исследование.") from None
+
+    def patient_image(self, ctx: Context) -> tuple[int, RawResponse]:
+        row = self._registry_row(ctx.params["id"], owner=ctx.session)
+        public = self._public(row["job_id"])
+        if public is None or public.get("status") != "confirmed":
+            raise GatewayError(404, "not_found", "Снимок появится здесь после проверки врачом.")
+        return self._png(row["job_id"], ctx.params["image"])
+
+    def _next(self, job: dict, episodes: dict[str, dict]) -> dict:
+        """What happened in the path service after confirmation: the episode and its first step, or why not."""
+        if job.get("routing_status") == "failed":
+            return {"warning": NOT_ROUTED}
+        raw = episodes.get(job.get("id"))
+        if raw is None:
+            if job.get("routing_status") != "sent":
+                return {"warning": "Сервис снимков не настроен на отправку заключений в сервис маршрута."}
+            return {"warning": "Обращение в сервисе маршрута пока не найдено. Обновите страницу."}
+        step = self._first_unfinished(raw)
+        return {"episode_id": raw["id"], "status": raw.get("status"),
+                "step": step.get("description") if step and raw.get("status") == "active" else None,
+                "reason": reason_text(raw.get("manual_reason")) if raw.get("status") == "manual_review" else ""}
+
+    def _doctor_item(self, row: dict, job: dict | None, names: dict[str, str], episodes: dict[str, dict]) -> dict:
+        ref = row.get("patient_ref")
+        item = {"id": row["job_id"], "patient": names.get(ref, "Пациент не указан") if ref else "Пациент не указан",
+                "patient_ref": ref, "created_at": row["created_at"], "uploaded_by_role": row["uploaded_by_role"],
+                "kit": row.get("kit")}
+        if job is None:
+            return {**item, "title": self._title(row), "status": "unavailable", "message": UNAVAILABLE}
+        demo = is_demo(job)
+        findings = []
+        for finding in (job.get("result") or {}).get("findings") or []:
+            entry = {"code": finding.get("code"), "description": finding.get("description"),
+                     "place": place(finding, job.get("study")),
+                     "sop_uid": (finding.get("localization") or {}).get("sop_uid")}
+            if not demo:
+                entry["confidence"] = finding.get("confidence")
+            findings.append(entry)
+        item.update(title=self._title(row, job), status=job.get("status"), demo=demo, reason=study_reason(job.get("reason")),
+                    routing_status=job.get("routing_status"), findings=findings)
+        confirmation = job.get("confirmation")
+        if confirmation:
+            item["confirmation"] = {"physician_id": confirmation.get("physician_id"),
+                                    "confirmed_at": confirmation.get("confirmed_at"), "edited": bool(job.get("edits")),
+                                    "conclusion": confirmation.get("conclusion"),
+                                    "finding_code": (confirmation.get("routing_payload") or {}).get("finding_code")}
+            item["next"] = self._next(job, episodes)
+        return item
+
+    def doctor_studies(self, ctx: Context) -> tuple[int, dict]:
+        rows = self.data_store().studies(self.config.home_clinic)
+        jobs = self._many(self._review, [row["job_id"] for row in rows])
+        names = self._patient_names() if rows else {}
+        episodes = self._episodes_by_report() if any(job and job.get("status") == "confirmed" for job in jobs) else {}
+        return 200, {"studies": [self._doctor_item(row, job, names, episodes) for row, job in zip(rows, jobs)]}
+
+    def doctor_study(self, ctx: Context) -> tuple[int, dict]:
+        row = self._registry_row(ctx.params["id"])
+        job = self._review(row["job_id"])
+        episodes = self._episodes_by_report() if job and job.get("status") == "confirmed" else {}
+        item = self._doctor_item(row, job, self._patient_names(), episodes)
+        if job is not None:
+            study = job.get("study") or {}
+            result = job.get("result") or {}
+            item.update(study={key: study.get(key) for key in ("task", "modality", "anatomy", "protocol_name", "instance_count")}
+                        | {"series_count": len(study.get("series") or {})} if study else None,
+                        images=images(study), limitations=result.get("limitations") or [],
+                        test_message="Техническая проверка, анализ не выполнялся" if job.get("status") == "test_only" else None,
+                        templates=conclusion_templates(job, item["title"], self.demo_texts)
+                        if job.get("status") == "awaiting_physician" else {})
+        return 200, {"study": item}
+
+    def doctor_image(self, ctx: Context) -> tuple[int, RawResponse]:
+        row = self._registry_row(ctx.params["id"])
+        return self._png(row["job_id"], ctx.params["image"])
+
+    def doctor_confirm(self, ctx: Context) -> tuple[int, dict]:
+        row = self._registry_row(ctx.params["id"])
+        job = self._review(row["job_id"])
+        if job is None:
+            raise GatewayError(409, "study_unavailable", UNAVAILABLE + ". Попросите загрузить исследование заново.")
+        if job.get("status") != "awaiting_physician":
+            raise GatewayError(409, "study_unavailable", "Исследование уже подтверждено или не ждёт проверки врача. Обновите страницу.")
+        conclusion = text(ctx.body.get("conclusion"), "conclusion", MAX_CONCLUSION)
+        codes = list(dict.fromkeys(f.get("code") for f in (job.get("result") or {}).get("findings") or []))
+        code = codes[0] if len(codes) == 1 else ctx.body.get("finding_code")
+        if code not in codes:
+            raise GatewayError(400, "invalid_input", "Выберите признак, который вы подтверждаете.")
+        template = conclusion_templates(job, self._title(row, job), self.demo_texts).get(code)
+        # physician_id and patient_ref come from the session and the registry, never from the request body.
+        data = confirm_body(ctx.session.actor, conclusion, code, template, row.get("patient_ref"))
+        status, body = self.upstream.request("image", "POST", "/v1/review/" + quote(row["job_id"], safe=""),
+                                             raw=data, content_type="application/json", auth="reviewer")
+        if status != 200 or not isinstance(body, dict):
+            raise human_error("image", status, body)
+        episodes = self._episodes_by_report() if body.get("routing_status") == "sent" else {}
+        item = self._doctor_item(row, body, self._patient_names(), episodes)
+        return 200, {"study": item, "next": item.get("next")}
+
+    def staff_manual_studies(self, ctx: Context) -> tuple[int, dict]:
+        """For the coordinator: who waits for a manual reading, and which confirmations never reached the path service.
+        No reason and no model output."""
+        rows = self.data_store().studies(self.config.home_clinic)
+        publics = self._many(self._public, [row["job_id"] for row in rows])
+        names = self._patient_names() if rows else {}
+        manual, not_routed = [], []
+        for row, public in zip(rows, publics):
+            if public is None:
+                continue
+            entry = {"id": row["job_id"], "patient": names.get(row.get("patient_ref"), "Пациент не указан"),
+                     "patient_ref": row.get("patient_ref"), "title": self._title(row), "created_at": row["created_at"]}
+            if public.get("status") == "manual_review":
+                manual.append(entry)
+            elif public.get("status") == "confirmed" and public.get("routing_status") == "failed":
+                not_routed.append({**entry, "warning": NOT_ROUTED})
+        return 200, {"manual": manual, "not_routed": not_routed}
+
 
 def make_handler(gateway: Gateway):
     class RequestHandler(BaseHTTPRequestHandler):
@@ -629,15 +964,32 @@ def make_handler(gateway: Gateway):
                     raise GatewayError(404, "not_found", "Такого адреса в API нет.")
                 key, params = found
                 role = self.headers.get("X-MM-Role")
+                raw_length = 0
                 if method in MUTATING:
                     origin = self.headers.get("Origin")
                     if origin is not None and origin not in {"http://" + h for h in gateway.allowed_hosts()}:
                         raise GatewayError(403, "forbidden_origin", "Запрос пришёл с чужой страницы и отклонён.")
                     if not role:
                         raise GatewayError(401, "no_session", "Окно не знает своей роли. Обновите страницу и выберите роль.")
-                    if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
-                        raise GatewayError(415, "unsupported_type", "Шлюз принимает только JSON.")
-                    body = self._body()
+                    content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                    if key in gateway.raw_routes:
+                        # The image service answers an oversized body without reading it and the client sees a
+                        # dropped connection, so type and size are checked here, before the body is read.
+                        if content_type != "application/zip":
+                            raise GatewayError(415, "unsupported_type", "Загрузите ZIP-архив с файлами DICOM.")
+                        try:
+                            raw_length = int(self.headers.get("Content-Length") or 0)
+                        except ValueError:
+                            raise GatewayError(400, "invalid_input", "Неверный заголовок Content-Length.") from None
+                        if raw_length <= 0:
+                            raise GatewayError(411, "length_required", "Архив пустой или без размера. Выберите файл заново.")
+                        if raw_length > MAX_ARCHIVE:
+                            raise GatewayError(413, "archive_too_large", "Архив больше 50 МиБ. Загрузите исследование без лишних файлов.")
+                        body = {}
+                    else:
+                        if content_type != "application/json":
+                            raise GatewayError(415, "unsupported_type", "Шлюз принимает только JSON.")
+                        body = self._body()
                 else:
                     body = {}
                 role = role if role in ROLES else None
@@ -649,9 +1001,13 @@ def make_handler(gateway: Gateway):
                     if session.role not in gateway.access.get(key, set()):
                         raise GatewayError(403, "forbidden", "Этой роли действие недоступно.")
                 query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
-                ctx = Context(role, session, body, params, session_cookie=cookie, query=query)
+                raw = self.rfile.read(raw_length) if raw_length else b""
+                ctx = Context(role, session, body, params, session_cookie=cookie, query=query, raw=raw)
                 status, payload = gateway.routes[key](ctx)
-                self._json(status, payload, ctx.cookies)
+                if isinstance(payload, RawResponse):
+                    self._send(status, payload.data, payload.content_type, {"Cache-Control": "no-store"})
+                else:
+                    self._json(status, payload, ctx.cookies)
             except GatewayError as exc:
                 self._json(exc.status, exc.payload(show_detail=bool(session and session.role in DETAIL_ROLES)))
             except StoreConflict as exc:
