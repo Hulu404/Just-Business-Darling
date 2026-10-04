@@ -13,7 +13,11 @@
   - Правка `test_gateway.py`: текстовые проверки (`localStorage`/URL/`on…=`) теперь только для `.html/.css/.js/.svg` (новая константа `TEXT_SUFFIXES`); поиск секретов — по байтам всех файлов. После правки gateway 87 OK (skipped=6) с .webp и .otf в `web/`.
   - Проверено: исходные проверки зелёные (числа выше); после скрипта и правки тестов быстрая зелёная; повторный запуск скрипта файлы не меняет. Отступлений от задания нет.
   - В коммит: `prompts/{12,13,14,15}-*.md`, `prompts/rescan-loop.md`, `prompts/rescan-README.md`, `prototype/rescan_extract.py`, `.gitignore`, `web/img/rescan/*.webp`, `test_gateway.py`, отчёт. Чужое (`prompts/09`, `PROGRESS_*`, `debug.log`, презентация) не трогалось.
-- [ ] Цикл 1. Шлюз: статика и защита
+- [x] **Цикл 1. Шлюз: статика и защита** — 2026-10-04 22:30
+  - `STATIC_TYPES`: добавлены `.webp` → `image/webp` и `.otf` → `font/otf`. В `CSP` добавлен `font-src 'self'`.
+  - Константа `BRAND_FONT = web/fonts/Stolzl-Regular.otf`; `GET /api/health` отдаёт `brand_font` (`.is_file()`).
+  - Тесты (`StaticTests`): `.otf`/`.webp` отдаются с верным типом на временной папке (патч `service.WEB_DIR`, шрифта в git нет); `/assets/index.txt` 404; CSP содержит `font-src 'self'` и `script-src 'self'`; `brand_font` false без файла, true с файлом (патч `service.BRAND_FONT`). Строка в README шлюза.
+  - Проверка (быстрая): image 20, path 12, clinic 8, medications 10, gateway 90 OK (было 87, +3 теста; skipped=6 — PostgreSQL). Отступлений нет.
 - [ ] Цикл 2. Шлюз: предпросмотр шага
 - [ ] Цикл 3. Шлюз: место и специалист записи
 - [ ] Цикл 4. Каркас кабинета

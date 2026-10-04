@@ -8,7 +8,9 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
+import service
 from errors import GatewayError
 from service import WEB_DIR, ConfigError, Gateway, load_config, make_handler
 from sessions import ensure_owner
@@ -287,6 +289,40 @@ class StaticTests(GatewayTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["Content-Type"].startswith("text/javascript"))
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+
+    def test_font_and_webp_served_with_type(self):
+        # Шрифта в git нет, картинки лежат по разным путям: проверяем на временной папке.
+        with tempfile.TemporaryDirectory() as directory:
+            web = Path(directory).resolve()
+            (web / "fonts").mkdir()
+            (web / "img").mkdir()
+            (web / "fonts" / "Stolzl-Regular.otf").write_bytes(b"OTTO\x00\x01font")
+            (web / "img" / "pic.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBPvp8")
+            with mock.patch.object(service, "WEB_DIR", web):
+                status, headers, body = self.call("GET", "/assets/fonts/Stolzl-Regular.otf")
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["Content-Type"], "font/otf")
+                self.assertEqual(body, b"OTTO\x00\x01font")
+                status, headers, body = self.call("GET", "/assets/img/pic.webp")
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["Content-Type"], "image/webp")
+                self.assertEqual(body, b"RIFF\x00\x00\x00\x00WEBPvp8")
+        self.assertEqual(self.call("GET", "/assets/index.txt")[0], 404)
+
+    def test_csp_allows_self_font_and_script(self):
+        self.assertIn("font-src 'self'", service.CSP)
+        self.assertIn("script-src 'self'", service.CSP)
+        _, headers, _ = self.call("GET", "/")
+        self.assertIn("font-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+
+    def test_health_reports_brand_font(self):
+        with tempfile.TemporaryDirectory() as directory:
+            font = Path(directory) / "Stolzl-Regular.otf"
+            with mock.patch.object(service, "BRAND_FONT", font):
+                self.assertEqual(self.call("GET", "/api/health")[2]["brand_font"], False)
+                font.write_bytes(b"OTTO")
+                self.assertEqual(self.call("GET", "/api/health")[2]["brand_font"], True)
 
     def test_no_escape_from_web(self):
         for path in ("/assets/../service.py", "/assets/..%2fservice.py", "/assets/%2e%2e/%2e%2e/start.py",

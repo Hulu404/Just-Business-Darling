@@ -32,11 +32,12 @@ DEFAULT_EXPLANATION = {"seen": "Заключение готово.", "means": "�
 PATIENT_STATUS = {"processing": "processing", "awaiting_physician": "awaiting", "manual_review": "manual",
                   "test_only": "manual", "confirmed": "confirmed"}
 WEB_DIR = Path(__file__).resolve().parent / "web"
+BRAND_FONT = WEB_DIR / "fonts" / "Stolzl-Regular.otf"
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
-                ".ico": "image/x-icon"}
+                ".ico": "image/x-icon", ".webp": "image/webp", ".otf": "font/otf"}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+       "font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 IMAGING_MODES = {"demo-scripted", "model", "no-model"}
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 DETAIL_ROLES = {"staff", "doctor", "partner"}
@@ -282,7 +283,7 @@ class Gateway:
     def health(self, ctx: Context) -> tuple[int, dict]:
         return 200, {"gateway": "ok", "auth": "demo-roles", "imaging_mode": self.config.imaging_mode,
                      "services": self.upstream.health_all(), "partner_clinics": self._partner_clinics(),
-                     "assistant": self.assistant.enabled}
+                     "assistant": self.assistant.enabled, "brand_font": BRAND_FONT.is_file()}
 
     def _partner_clinics(self) -> list[dict]:
         """Partner clinics a window can open: a staff token, a demo person, a name from the clinic network."""

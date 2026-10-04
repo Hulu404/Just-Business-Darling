@@ -113,7 +113,8 @@ python .\medmarshrut_gateway_service\service.py
 - Слушает только `127.0.0.1`; `Host` должен быть `127.0.0.1:<порт>` или `localhost:<порт>`.
 - `POST`, `PUT`, `PATCH`, `DELETE` — только с `Origin` шлюза или без него, с `X-MM-Role` и `Content-Type: application/json`.
 - На каждом ответе `X-Content-Type-Options: nosniff` и `Referrer-Policy: no-referrer`, на ответах API `Cache-Control: no-store`, на HTML — строгий `Content-Security-Policy` (скрипты только из файлов).
-- Статика — только из `web/`, по списку расширений, без выхода за пределы папки.
+- Статика — только из `web/`, по списку расширений, без выхода за пределы папки. В списке есть `.webp` (картинки) и `.otf` (шрифт кабинета врача); CSP разрешает `font-src 'self'`.
+- `GET /api/health` отдаёт `brand_font`: лежит ли на диске `web/fonts/Stolzl-Regular.otf`. Шрифт в git не входит (коммерческий), поэтому приложение запрашивает его только при `brand_font: true`.
 - Трассировки уходят в stderr шлюза, в ответ — только `{"error": {"code": "internal", ...}}`.
 
 ## Ошибки
