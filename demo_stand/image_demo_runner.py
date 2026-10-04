@@ -21,7 +21,7 @@ class DemoScriptedBackend(ModelBackend):
         self.index = json.loads(self.index_path.read_text(encoding="utf-8"))
 
     def check_compatibility(self, study, task):
-        return study["modality"] == task.modality, "Modality does not match task"
+        return study["modality"] in task.modalities, "Modality does not match task"
 
     def infer_local(self, study, task, archive):
         base = {"kind": "model_inference", "backend": "DemoScriptedBackend", "model_version": MODEL_VERSION,
@@ -37,7 +37,7 @@ class DemoScriptedBackend(ModelBackend):
         findings = []
         for item in script:
             for series_uid, series in study["series"].items():
-                if study["modality"] == "MG":
+                if study["modality"] in {"MG", "CR", "DX"}:  # localised by projection
                     sop_uid = next((k for k, v in series["projections"].items() if v == item["projection"]), None)
                     place = {"projection": item["projection"]}
                 else:

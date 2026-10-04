@@ -6,6 +6,7 @@ import hashlib
 import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from queue import Empty, LifoQueue
 from urllib.parse import parse_qs, urlsplit
 
 from catalog import FINDING_TEXTS, FOLLOWUPS, SERVICES, STUDY_NAMES
@@ -53,6 +54,7 @@ class GatewayStore:
         try:
             self._connect = connect
             self._dsn = dsn
+            self._idle: LifoQueue = LifoQueue()
             self.db = connect(dsn, autocommit=True)
             with self.db.cursor() as cur:
                 cur.execute(f'SET search_path TO "{self.schema}", pg_catalog')
@@ -64,37 +66,70 @@ class GatewayStore:
         except Exception:
             raise StoreError("Не удалось подключиться к PostgreSQL или проверить схему. Проверьте параметры стенда.") from None
 
+    def _open(self):
+        conn = self._connect(self._dsn, autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(f'SET search_path TO "{self.schema}", pg_catalog')
+        return conn
+
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, read_only: bool = False):
+        """One transaction on a reused connection: a new TLS connection to a remote database costs seconds.
+        read_only: a single SELECT in autocommit, without BEGIN/COMMIT round trips."""
+        conn = None
         try:
-            with self._connect(self._dsn, autocommit=True) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f'SET search_path TO "{self.schema}", pg_catalog')
+            while conn is None:
+                try:
+                    conn = self._idle.get_nowait()
+                except Empty:
+                    conn = self._open()
+                    break
+                if conn.closed or getattr(conn, "broken", False):
+                    conn = None
+            with conn.cursor() as cur:
+                if read_only:
+                    yield cur
+                else:
                     with conn.transaction():
                         yield cur
         except StoreError:
+            if conn is not None:
+                self._idle.put(conn)  # e.g. StoreConflict: the transaction rolled back, the connection is fine
             raise
         except Exception:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             raise StoreError("Операция PostgreSQL не выполнена. Проверьте доступность базы и повторите действие.") from None
+        else:
+            self._idle.put(conn)
 
     def close(self) -> None:
+        while True:
+            try:
+                self._idle.get_nowait().close()
+            except Empty:
+                break
         self.db.close()
 
     def verify_schema(self) -> None:
         try:
             with self.db.cursor() as cur:
                 cur.execute("SELECT to_regclass('services'), to_regclass('finding_texts'), "
-                            "to_regclass('slots'), to_regclass('appointments')")
+                            "to_regclass('slots'), to_regclass('appointments'), to_regclass('study_registry'), "
+                            "to_regclass('referral_links')")
                 if not all(cur.fetchone()):
                     raise StoreError("Миграция шлюза не применена. Запустите migrate.py apply для выбранной схемы.")
-                cur.execute("""SELECT count(*)=8 AND bool_and(
+                cur.execute("""SELECT count(*)=10 AND bool_and(
                                has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'SELECT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'INSERT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'UPDATE')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'DELETE'))
                                FROM pg_tables WHERE schemaname=%s AND tablename IN
                                 ('services','service_followups','finding_texts','slots','appointments',
-                                'threads','messages','outcome_submissions')""",
+                                'threads','messages','outcome_submissions','study_registry','referral_links')""",
                             (self.schema, self.schema, self.schema, self.schema, self.schema))
                 if not cur.fetchone()[0]:
                     raise StoreError("Серверной роли нужны права чтения и записи таблиц шлюза.")
@@ -106,7 +141,8 @@ class GatewayStore:
     def clear_working(self) -> None:
         """Clean data tied to IDs of the freshly recreated core services."""
         with self.transaction() as cur:
-            for table in ("messages", "threads", "appointments", "slots", "outcome_submissions"):
+            for table in ("messages", "threads", "appointments", "slots", "outcome_submissions", "study_registry",
+                          "referral_links"):
                 cur.execute(f"DELETE FROM {table}")
 
     def seed_catalog(self, clinic_id: str) -> None:
@@ -151,7 +187,7 @@ class GatewayStore:
                                 for (typ, anatomy), title in STUDY_NAMES.items()], "demo": True}
 
     def explanation(self, clinic_id: str, finding_code: str) -> dict | None:
-        with self.transaction() as cur:
+        with self.transaction(read_only=True) as cur:
             cur.execute("SELECT seen, means FROM finding_texts WHERE clinic_id=%s AND finding_code=%s AND approved",
                         (clinic_id, finding_code))
             row = cur.fetchone()
@@ -236,7 +272,7 @@ class GatewayStore:
             cur.execute("UPDATE appointments SET status=%s, updated_at=now() WHERE id=%s", (status, appointment_id))
 
     def appointment_for_step(self, episode_id: str, step_id: str) -> dict | None:
-        with self.transaction() as cur:
+        with self.transaction(read_only=True) as cur:
             cur.execute("""SELECT id, starts_at, status FROM appointments
                            WHERE episode_id=%s AND step_id=%s AND status IN ('offered','confirmed')""",
                         (episode_id, step_id))
@@ -270,7 +306,7 @@ class GatewayStore:
                         (thread_id, actor, body, intent, episode_id, step_id))
 
     def pending_patient_messages(self, clinic_id: str) -> list[dict]:
-        with self.transaction() as cur:
+        with self.transaction(read_only=True) as cur:
             cur.execute("""SELECT m.id, t.patient_ref, m.episode_id, m.step_id, m.intent,
                            m.body, m.created_at FROM messages m JOIN threads t ON t.id=m.thread_id
                            WHERE t.clinic_id=%s AND m.needs_action AND m.resolved_at IS NULL
@@ -278,6 +314,70 @@ class GatewayStore:
             rows = cur.fetchall()
         return [{"id": str(row[0]), "patient_ref": row[1], "episode_id": row[2], "step_id": row[3],
                  "intent": row[4], "body": row[5], "created_at": row[6].isoformat()} for row in rows]
+
+    STUDY_FIELDS = ("job_id", "clinic_id", "patient_ref", "task", "title", "kit", "uploaded_by_role",
+                    "uploaded_by", "consent_at", "created_at")
+
+    def _study_row(self, row) -> dict:
+        study = dict(zip(self.STUDY_FIELDS, row))
+        for key in ("consent_at", "created_at"):
+            study[key] = study[key].isoformat() if study[key] else None
+        return study
+
+    def register_study(self, job_id: str, clinic_id: str, patient_ref: str | None, task: str, title: str | None,
+                       kit: str | None, uploaded_by_role: str, uploaded_by: str, consent_at: datetime | None) -> dict:
+        """Idempotent by job_id: a repeat with the same owner returns the stored row, another owner is a conflict."""
+        with self.transaction() as cur:
+            cur.execute("""INSERT INTO study_registry
+                           (job_id, clinic_id, patient_ref, task, title, kit, uploaded_by_role, uploaded_by, consent_at)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (job_id) DO NOTHING""",
+                        (job_id, clinic_id, patient_ref, task, title, kit, uploaded_by_role, uploaded_by, consent_at))
+            cur.execute(f"SELECT {', '.join(self.STUDY_FIELDS)} FROM study_registry WHERE job_id=%s", (job_id,))
+            study = self._study_row(cur.fetchone())
+        if (study["clinic_id"], study["patient_ref"], study["task"]) != (clinic_id, patient_ref, task):
+            raise StoreConflict("Это исследование уже зарегистрировано за другим пациентом. Загрузите его заново.")
+        return study
+
+    def studies(self, clinic_id: str, patient_ref: str | None = None) -> list[dict]:
+        with self.transaction(read_only=True) as cur:
+            if patient_ref is None:
+                cur.execute(f"SELECT {', '.join(self.STUDY_FIELDS)} FROM study_registry WHERE clinic_id=%s "
+                            "ORDER BY created_at DESC, job_id", (clinic_id,))
+            else:
+                cur.execute(f"SELECT {', '.join(self.STUDY_FIELDS)} FROM study_registry WHERE clinic_id=%s "
+                            "AND patient_ref=%s ORDER BY created_at DESC, job_id", (clinic_id, patient_ref))
+            return [self._study_row(row) for row in cur.fetchall()]
+
+    def study(self, clinic_id: str, job_id: str) -> dict | None:
+        with self.transaction(read_only=True) as cur:
+            cur.execute(f"SELECT {', '.join(self.STUDY_FIELDS)} FROM study_registry WHERE clinic_id=%s AND job_id=%s",
+                        (clinic_id, job_id))
+            row = cur.fetchone()
+        return self._study_row(row) if row else None
+
+    def link_referral(self, referral_id: str, episode_id: str, step_id: str, created_by: str) -> dict:
+        """Idempotent: a repeat for the same step returns the stored link, another step is a conflict."""
+        with self.transaction() as cur:
+            cur.execute("""INSERT INTO referral_links (referral_id, episode_id, step_id, created_by)
+                           VALUES (%s,%s,%s,%s) ON CONFLICT (referral_id) DO NOTHING""",
+                        (referral_id, episode_id, step_id, created_by))
+            cur.execute("SELECT referral_id, episode_id, step_id, created_by, created_at FROM referral_links "
+                        "WHERE referral_id=%s", (referral_id,))
+            row = cur.fetchone()
+        link = {"referral_id": row[0], "episode_id": row[1], "step_id": row[2], "created_by": row[3],
+                "created_at": row[4].isoformat()}
+        if (link["episode_id"], link["step_id"]) != (episode_id, step_id):
+            raise StoreConflict("Это направление уже связано с другим шагом плана. Откройте его во вкладке «Направления».")
+        return link
+
+    def referral_links(self, referral_ids: list[str] | None = None) -> dict[str, dict]:
+        with self.transaction(read_only=True) as cur:
+            if referral_ids is None:
+                cur.execute("SELECT referral_id, episode_id, step_id FROM referral_links")
+            else:
+                cur.execute("SELECT referral_id, episode_id, step_id FROM referral_links WHERE referral_id = ANY(%s)",
+                            (list(referral_ids),))
+            return {row[0]: {"episode_id": row[1], "step_id": row[2]} for row in cur.fetchall()}
 
     def outcome_timestamp(self, event_id: str, episode_id: str, step_id: str,
                           physician_id: str, content: dict) -> str:

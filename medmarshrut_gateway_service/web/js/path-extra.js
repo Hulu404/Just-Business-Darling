@@ -44,6 +44,8 @@ export function pathDoctor(){
     <div class="sectionhead"><h2>Записаны на приём</h2></div><div class="grid two">${booked.map(card).join('') || '<div class="note">Записей пока нет.</div>'}</div>`;
 }
 
+/* Вид исследования по-русски: коды сервиса пути не показываем */
+const studyLabel = type => ({ct:'КТ', mr:'МРТ', mammography:'Маммография', xray:'Рентгенография'})[type] || type;
 const reason = value => ({rule_not_approved:'Правило ещё не утверждено клиникой: нужен план врача',
   unknown_finding_code:'Для этой находки в клинике нет правила', no_approved_rule:'Правило есть, но не для этого исследования',
   unsupported_protocol:'Для такого исследования в клинике нет маршрутов'})[value] || value;
@@ -53,10 +55,10 @@ export function pathRules(){
   const rules = data.rules?.rules || [];
   return intro + `<div class="note">Версия ${safe(data.rules?.version)}. Правила утверждает клиника. Они меняются в файле правил вместе с версией.</div>
     <div class="sectionhead"><h2>Правила маршрута после исследований</h2></div><div class="tablewrap"><table><thead><tr><th>Исследование</th><th>Находка</th><th>Следующий шаг</th><th>Статус</th></tr></thead><tbody>
-    ${rules.map(r => `<tr><td>${safe(r.study_type)} · ${safe(r.anatomy)} · ${safe(r.protocol_name)}</td><td>${safe(r.finding_code)}</td>
+    ${rules.map(r => `<tr><td>${safe(studyLabel(r.study_type))} · ${safe(r.anatomy)} · ${safe(r.protocol_name)}</td><td>${safe(r.finding_code)}</td>
       <td>${r.steps.map(s => safe(s.description)).join(' + ') || 'План врача'}</td><td>${badge(r.approved ? 'Утверждено' : 'Черновик',r.approved ? '' : 'orange')}</td></tr>`).join('')}</tbody></table></div>
     <div class="sectionhead"><h2>Проверить правило</h2></div><div class="panel"><div class="field"><label for="pathRule">Исследование и находка</label>
-    <select id="pathRule">${rules.map((r,i) => `<option value="${i}">${safe(r.study_type)} · ${safe(r.finding_code)}</option>`).join('')}</select></div>
+    <select id="pathRule">${rules.map((r,i) => `<option value="${i}">${safe(studyLabel(r.study_type))} · ${safe(r.finding_code)}</option>`).join('')}</select></div>
     <div class="actions">${btn('Проверить','pathDryRun')}</div>${data.dry ? `<div class="note" style="margin-top:14px">${data.dry.manual_reason ? safe(reason(data.dry.manual_reason)) :
       data.dry.steps.map(s => safe(s.description)).join(' → ')}</div>` : ''}</div>`;
 }

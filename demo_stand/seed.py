@@ -1,14 +1,13 @@
 """Fill the demo stand through public service APIs only. Synthetic people and studies."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from stand_api import (DEMO_DIR, StandError, clinic_signed, clinic_staff, confirm, env, expect, find_episode,
-                       load_json, path_post, review, step_action, upload_kit, utf8_console)
+from stand_api import (DEMO_DIR, Gateway, StandError, clinic_signed, clinic_staff, confirm, env, expect, find_episode,
+                       load_json, path_post, review, step_action, utf8_console)
 
 HOME = "clinic-central"
 COORDINATOR = "coordinator-natalia"
@@ -53,8 +52,8 @@ class Seeder:
         self.kit = load_json(self.kit_dir / "kit.json")
         self.people = load_json(DEMO_DIR / "people.demo.json")
         self.conclusions = load_json(DEMO_DIR / "conclusions.demo.json")
-        self.registry: dict[str, dict] = {}
         self.patient_ids: dict[str, str] = {}
+        self.staff: Gateway | None = None
         self.now = datetime.now().astimezone()
         self.problems = 0
         self.real_image = os.environ.get("DEMO_IMAGE_MODE") == "real"
@@ -80,21 +79,20 @@ class Seeder:
     # ---------- image + path ----------
 
     def study(self, ref: str, *, confirm_it: bool) -> dict | None:
-        """Upload the patient's kit study; confirm it as the radiologist. Returns the episode or None."""
-        status, public = upload_kit(self.kit_dir, ref)
-        job_id = public["id"]
-        self.registry[job_id] = {"patient_ref": ref, "title": self.kit[ref]["title"], "kind": self.kit[ref]["kind"],
-                                 "kit": ref}
-        self.save_registry()
-        self.last_status = public["status"]
-        if public["status"] != "awaiting_physician":
+        """Submit the patient's kit study through the gateway, as the clinic's RIS export would: the gateway builds
+        the manifest and writes study_registry. Then confirm it as the radiologist. Returns the episode or None."""
+        if self.staff is None:
+            self.staff = Gateway("staff")
+        status, body = self.staff.call("POST", f"/api/demo/studies/{ref}/submit", {"patient_ref": ref})
+        study = expect(status, body, 201, f"Исследование {ref} через шлюз")["study"]
+        job_id = study["id"]
+        self.last_status = study["status"]
+        if study["status"] != "awaiting_physician":
             if confirm_it and self.real_image:
-                say(True, f"{ref}: настоящий сервис снимков отправил исследование на ручной разбор "
-                          f"({public['reason']}); дальше сценарий не идёт")
+                say(True, f"{ref}: настоящий сервис снимков отправил исследование на ручной разбор; дальше сценарий не идёт")
             elif confirm_it:
                 self.problems += 1
-                say(False, f"{ref}: исследование ушло на ручной разбор в сервисе снимков ({public['reason']}); "
-                           f"сценарий дальше не идёт")
+                say(False, f"{ref}: исследование ушло на ручной разбор в сервисе снимков; сценарий дальше не идёт")
             return None
         if not confirm_it:
             return None
@@ -114,10 +112,6 @@ class Seeder:
     def check(self, ok: bool, text: str) -> None:
         self.problems += not ok
         say(ok, text)
-
-    def save_registry(self) -> None:
-        (self.state_dir / "studies.json").write_text(json.dumps(self.registry, ensure_ascii=False, indent=2),
-                                                     encoding="utf-8")
 
     def run(self) -> int:
         self.register_patients()
@@ -181,7 +175,7 @@ class Seeder:
                    "demo-patient-7: ручной разбор в сервисе снимков, эпизода нет"
                    + ("" if self.real_image else " (находок нет)"))
 
-        print(f"Реестр исследований: {self.state_dir / 'studies.json'}", flush=True)
+        print("Реестр исследований: таблица study_registry в схеме шлюза", flush=True)
         return 1 if self.problems else 0
 
 

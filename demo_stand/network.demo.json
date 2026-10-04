@@ -9,6 +9,7 @@
     {"clinic_id": "clinic-central", "study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD", "finding_code": "*", "approved": true},
     {"clinic_id": "clinic-central", "study_type": "mr", "anatomy": "KNEE", "protocol_name": "MR_KNEE", "finding_code": "*", "approved": true},
     {"clinic_id": "clinic-central", "study_type": "mammography", "anatomy": "BREAST", "protocol_name": "MG_SCREENING", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-central", "study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA", "finding_code": "*", "approved": true},
     {"clinic_id": "clinic-partner-1", "study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD", "finding_code": "*", "approved": true},
     {"clinic_id": "clinic-partner-1", "study_type": "mr", "anatomy": "KNEE", "protocol_name": "MR_KNEE", "finding_code": "*", "approved": true},
     {"clinic_id": "clinic-partner-2", "study_type": "mammography", "anatomy": "BREAST", "protocol_name": "MG_SCREENING", "finding_code": "*", "approved": true}

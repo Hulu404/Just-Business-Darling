@@ -20,13 +20,22 @@ class TaskConfig:
     modality: str
     min_instances: int
     required_views: frozenset[tuple[str, str]] = frozenset()
+    modalities: frozenset[str] = frozenset()  # accepted DICOM modalities; empty means {modality}
 
+    def __post_init__(self) -> None:
+        if not self.modalities:
+            object.__setattr__(self, "modalities", frozenset({self.modality}))
+
+
+XRAY_MODALITIES = frozenset({"CR", "DX"})
 
 TASKS = {
     "ct_general": TaskConfig("ct_general", "CT", 2),
     "mr_general": TaskConfig("mr_general", "MR", 2),
     "mg_screening_2d": TaskConfig("mg_screening_2d", "MG", 4,
         frozenset({("L", "CC"), ("L", "MLO"), ("R", "CC"), ("R", "MLO")})),
+    # Chest X-ray: one frontal view (PA or AP), a lateral view is optional; CR and DX are one task.
+    "xr_general": TaskConfig("xr_general", "DX", 1, modalities=XRAY_MODALITIES),
 }
 
 
@@ -62,7 +71,7 @@ class LocalONNXBackend(ModelBackend):
                         "weights_sha256", "input_size", "labels", "limitations"}
             if not isinstance(c, dict) or not required <= c.keys():
                 raise ModelError("Incomplete model configuration")
-            if c["task"] not in TASKS or c["modality"] != TASKS[c["task"]].modality:
+            if c["task"] not in TASKS or c["modality"] not in TASKS[c["task"]].modalities:
                 raise ModelError("Model task or modality mismatch")
             for key in ("model_version", "preprocessing_version", "anatomy", "diagnostic_task", "protocol_name"):
                 if not isinstance(c[key], str) or not c[key].strip():
@@ -162,6 +171,8 @@ class LocalONNXBackend(ModelBackend):
                         location = {"series_uid": str(ds.SeriesInstanceUID), "sop_uid": str(ds.SOPInstanceUID)}
                         if task.modality == "MG":
                             location["projection"] = f"{ds.ImageLaterality}-{ds.ViewPosition}"
+                        elif task.modalities & XRAY_MODALITIES:
+                            location["projection"] = str(ds.ViewPosition).upper()
                         else:
                             location["slice_index"] = study["series"][location["series_uid"]]["ordered_sop_uids"].index(location["sop_uid"]) + 1
                         findings.append({"code": label["code"], "description": label["description"],
@@ -188,7 +199,7 @@ class TestBackend(ModelBackend):
         self.loaded = True
 
     def check_compatibility(self, study: dict[str, Any], task: TaskConfig) -> tuple[bool, str]:
-        return study["modality"] == task.modality, "Modality does not match task"
+        return study["modality"] in task.modalities, "Modality does not match task"
 
     def infer_local(self, study: dict[str, Any], task: TaskConfig, archive: bytes) -> dict[str, Any]:
         if not self.loaded:

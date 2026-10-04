@@ -1,17 +1,18 @@
-import { DEMO, PARTNERS, PHARMACIES, PRODUCTS, RX_STOCK, scenarios, slotsFor } from './demo-data.js';
-import { addLog, analyze, attendStep, bookStep, byKey, confirmRoute, createEpisodeFromStudy, currentStep, ep, live, mkRequest, myEpisodes, notify, offerStep, pushMsg, refKey, refuseStep, reopenStep, savePlan, slotLine, stepOf, studyOf, title, unbookStep, upsertReferral } from './domain.js';
-import { doctor, planModal, reading, study } from './pages/doctor.js';
-import { REASONS, appointments, cartTotal, checkoutModal, createOwnEpisode, documents, home, imaging, intake, laterModal, messages, pharmacy, plan, result, review, slotAskModal, summaryText, uploadModal } from './pages/patient.js';
+import { DEMO, PHARMACIES, PRODUCTS, RX_STOCK, scenarios, slotsFor } from './demo-data.js';
+import { addLog, analyze, attendStep, bookStep, byKey, confirmRoute, createEpisodeFromStudy, currentStep, ep, live, mkRequest, myEpisodes, notify, offerStep, pushMsg, refKey, refuseStep, reopenStep, savePlan, slotLine, stepOf, studyOf, title, unbookStep } from './domain.js';
+import { doctor, planModal } from './pages/doctor.js';
+import { REASONS, appointments, cartTotal, checkoutModal, createOwnEpisode, documents, home, intake, laterModal, messages, pharmacy, plan, result, review, slotAskModal, summaryText } from './pages/patient.js';
 import { services } from './pages/services.js';
-import { REF_FLOW, analytics, calcOut, casePage, comms, inbox, partners, pharmacyAdmin, reqNewModal, requests, rules, sampleText, scheduling, slotListModal, who, writeModal } from './pages/staff.js';
+import { analytics, calcOut, casePage, comms, inbox, pharmacyAdmin, reqNewModal, requests, rules, sampleText, scheduling, slotListModal, who, writeModal } from './pages/staff.js';
 import { HOME, render, renderShell } from './shell.js';
-import { freshState, patientName, setState, staffName, state, ui } from './state.js';
+import { freshState, health, patientName, setState, staffName, state, ui } from './state.js';
 import { $, $$, btn, closeModal, go, lc, modalHead, navBtn, openModal, plural, rub, safe, toast } from './ui.js';
 
 /* =====================================================================
    Действия и события
    ===================================================================== */
-export const PAGES = {home, intake, review, result, plan, imaging, appointments, messages, pharmacy, documents, inbox, case:casePage, scheduling, requests, comms, partners, pharmacyAdmin, rules, analytics, reading, study, doctor, services};
+/* Экраны «Что на снимке», «Снимок и заключение» и «Черновики ИИ» добавляет main.js из imaging-ui.js */
+export const PAGES = {home, intake, review, result, plan, appointments, messages, pharmacy, documents, inbox, case:casePage, scheduling, requests, comms, pharmacyAdmin, rules, analytics, doctor, services};
 export let orderNo = 1040, reserveNo = 217;
 export const actor = () => state.role === 'patient' ? 'Пациент' : state.role === 'doctor' ? 'Врач' : staffName();
 export const clearIntake = () => { Object.assign(state, {symptoms:'', duration:'', redflag:false, doctor:'', wait:'', documentName:'', documentNotes:'', routeCreated:false}); state.episodes = state.episodes.filter(e => e.id !== 'own'); };
@@ -20,26 +21,6 @@ export function formValues(){
   const data = new FormData($('#intakeForm'));
   return {symptoms:data.get('symptoms') || '', duration:data.get('duration') || '', city:data.get('city') || '', age:data.get('age'), channel:data.get('channel'), doctor:data.get('doctor') || state.doctor, wait:data.get('wait') || state.wait, redflag:data.has('redflag')};
 }
-export function advanceReferral(r){
-  const i = REF_FLOW.indexOf(r.status);
-  const e = r.episodeId && ep(r.episodeId), s = e && stepOf(e, r.stepId);
-  if (i === 0 && s){ slotListModal(refKey(e, s), 'staff'); return; }
-  if (i < 0 || i >= REF_FLOW.length - 1) return;
-  r.status = REF_FLOW[i + 1];
-  if (s && r.status === 'Услуга оказана'){ s.status = 'attended'; addLog(e, PARTNERS[r.partner].name, 'Услуга оказана: ' + title(s)); }
-  if (s && r.status === 'Результат получен'){
-    s.status = 'completed'; s.outcome = 'Результат от партнёра получен';
-    addLog(e, PARTNERS[r.partner].name, 'Результат передан в клинику: ' + title(s));
-    notify(e, 'Результат от партнёра', `Результат от партнёра уже в вашем плане: ${lc(title(s))}. Врач посмотрит его и назначит следующий шаг.`, [['Открыть план', 'nav', 'plan']]);
-    if (!e.steps.some(live)){
-      e.status = 'manual_review'; e.suggest = []; e.reason = 'Пришёл результат от партнёра: врач назначает следующий шаг';
-      mkRequest(e, 'staff', 'route', 'Результат от партнёра', `${e.patient}: пришёл результат от партнёра (${lc(title(s))}). Посмотрите и назначьте следующий шаг.`);
-    }
-  }
-  render();
-  toast('Направление: ' + lc(r.status));
-}
-
 export const ACTIONS = {
   menu(){ ui.mobileOpen = !ui.mobileOpen; renderShell(); },
   close(){ closeModal(); },
@@ -162,16 +143,7 @@ export const ACTIONS = {
     render(); toast('Статус: ' + lc(next));
   },
 
-  /* --- что на снимке --- */
-  uploadOpen(){ state.role = 'patient'; go('imaging'); uploadModal(); },
-  upload(){
-    toast('Пока недоступно на стенде'); // Задание 05
-  },
-  studyOpen(d){ state.sel.study = d.id; go('study'); },
-  studyConfirm(d){
-    toast('Пока недоступно на стенде'); // Задание 05
-  },
-  studyManual(){ toast('Пока недоступно на стенде'); }, // Задание 05
+  /* --- что на снимке: действия в imaging-ui.js --- */
 
   /* --- координатор --- */
   inboxTab(d){ state.sel.inboxTab = d.id; render(); },
@@ -208,8 +180,6 @@ export const ACTIONS = {
     addLog(e, staffName(), 'Сообщение пациенту: ' + text);
     closeModal(); render(); toast('Сообщение отправлено');
   },
-  refAdvance(d){ advanceReferral(state.referrals.find(x => x.id === d.id)); },
-  refStep(d){ const [e, s] = byKey(d.key); advanceReferral(state.referrals.find(x => x.episodeId === e.id && x.stepId === s.id) || upsertReferral(e, s, 'Записан у партнёра')); },
   partnersTab(d){ state.sel.partnersTab = d.id; render(); },
   ruleToggle(d){
     state.ruleApproved[d.id] = !state.ruleApproved[d.id];
@@ -264,7 +234,12 @@ document.addEventListener('submit', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.id === 'role'){ state.role = t.value; go(HOME[state.role]); return; }
+  if (t.id === 'role'){
+    const [role, clinic] = t.value.split(':');
+    state.role = role;
+    if (clinic) state.partnerClinic = clinic;
+    go(HOME[state.role]); return;
+  }
   if (t.id === 'docFile'){ state.documentName = t.files && t.files[0] ? t.files[0].name : ''; toast(state.documentName ? 'Имя файла добавлено к обращению' : 'Файл не выбран'); return; }
   if (t.dataset.rule){ state.rules[t.dataset.rule] = t.checked; toast('Настройка сохранена до обновления страницы'); }
   if (t.dataset.trigger){ state.triggers[t.dataset.trigger] = t.checked; toast(t.checked ? 'Сценарий включён' : 'Сценарий выключен'); }
@@ -272,13 +247,6 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.id === 'slice'){
-    const v = Number(t.value), k = 1 - Math.abs(v - 142) * 0.012;
-    $('#sliceLabel').textContent = `Срез ${v} из 310`;
-    const mark = $('#ctMark'), lungs = $('#ctLungs');
-    if (mark) mark.style.display = Math.abs(v - 142) <= 3 ? '' : 'none';
-    if (lungs) lungs.setAttribute('transform', `translate(180 152) scale(${k.toFixed(3)}) translate(-180 -152)`);
-  }
   if (t.dataset.calc){ state.calc[t.dataset.calc] = Math.max(0, Number(t.value) || 0); $('#calcOut').innerHTML = calcOut(); }
   if (t.id === 'sbText') state.sandbox.text = t.value;
 });
@@ -298,6 +266,7 @@ document.addEventListener('click', e => {
   if (d.jump){
     const [role, page, tab] = d.jump.split(':');
     state.role = role;
+    if (role === 'partner') state.partnerClinic = state.partnerClinic || (health.data?.partner_clinics || [])[0]?.clinic_id;
     if (page === 'pharmacy' && tab) state.sel.pharmTab = tab;
     if (page === 'partners' && tab) state.sel.partnersTab = tab;
     if (page === 'appointments') state.sel.slotTab = 'all';

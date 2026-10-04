@@ -18,7 +18,9 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from dicom_ingest import MAX_ARCHIVE, IntakeError, inspect_archive, parse_manifest
-from model import TASKS, LocalONNXBackend, ModelBackend, ModelError, TestBackend
+from model import TASKS, XRAY_MODALITIES, LocalONNXBackend, ModelBackend, ModelError, TestBackend
+
+PROJECTION_MODALITIES = {"MG"} | XRAY_MODALITIES  # localised by projection, not by slice
 
 
 class ReviewError(Exception):
@@ -53,7 +55,7 @@ def _validate_result(result: dict, study: dict) -> None:
         confidence = finding.get("confidence")
         if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
             raise ModelError("Invalid confidence")
-        if study["modality"] == "MG":
+        if study["modality"] in PROJECTION_MODALITIES:
             if series["projections"].get(loc.get("sop_uid")) != loc.get("projection"):
                 raise ModelError("Invalid projection")
         elif (loc.get("sop_uid") not in series["ordered_sop_uids"] or
@@ -153,7 +155,7 @@ class StudyService:
             archive = self._archives.get(job_id)
             study = self._jobs.get(job_id, {}).get("study")
         if archive is None or not study or not any(sop_uid in s.get("ordered_sop_uids", [])
-                                                   for s in study["series"].values()) and study["modality"] != "MG":
+                                                   for s in study["series"].values()) and study["modality"] not in PROJECTION_MODALITIES:
             return None
         with zipfile.ZipFile(io.BytesIO(archive)) as z:
             from pydicom import dcmread
@@ -188,7 +190,7 @@ class StudyService:
                 raise ReviewError("Invalid physician confirmation or finding code")
             finding = next(f for f in job["result"]["findings"] if f["code"] == code)
             confirmed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            payload = {"study_type": {"CT": "ct", "MR": "mr", "MG": "mammography"}.get(job["study"]["modality"]),
+            payload = {"study_type": {"CT": "ct", "MR": "mr", "MG": "mammography", "CR": "xray", "DX": "xray"}.get(job["study"]["modality"]),
                        "finding_code": code, "conclusion": conclusion, "confidence": finding["confidence"],
                        "source_report_id": job_id, "source_model": job["result"]["model_version"],
                        "source_service": "medmarshrut_image_service", "source_report_version": 1,

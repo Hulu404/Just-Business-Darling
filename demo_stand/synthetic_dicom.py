@@ -10,13 +10,15 @@ from pathlib import Path
 
 import numpy as np
 from pydicom.dataset import FileDataset, FileMetaDataset
-from pydicom.uid import (CTImageStorage, MRImageStorage,
+from pydicom.uid import (CTImageStorage, MRImageStorage, DigitalXRayImageStorageForPresentation,
                          DigitalMammographyXRayImageStorageForPresentation,
                          ExplicitVRLittleEndian, generate_uid)
 
 SIZE = 256
 
 KINDS = {
+    "xr": {"title": "Рентгенография органов грудной клетки", "task": "xr_general", "modality": "DX",
+           "body_part": "CHEST", "protocol": "CHEST_PA", "study_type": "xray", "count": 1, "spacing": "0.15"},
     "ct": {"title": "КТ органов грудной клетки", "task": "ct_general", "modality": "CT",
            "body_part": "CHEST", "protocol": "CHEST_STANDARD", "study_type": "ct", "count": 3, "spacing": "0.7"},
     "mr": {"title": "МРТ коленного сустава", "task": "mr_general", "modality": "MR",
@@ -28,6 +30,7 @@ MG_VIEWS = [("L", "CC"), ("L", "MLO"), ("R", "CC"), ("R", "MLO")]
 
 # Scripted findings shown to the physician. Codes match demo_stand/rules.demo.json.
 FINDINGS = {
+    "DEMO_XR_INFILTRATE": {"kind": "xr", "description": "участок уплотнения лёгочной ткани", "projection": "PA"},
     "DEMO_CT_INFILTRATE": {"kind": "ct", "description": "участок уплотнения лёгочной ткани", "slice_index": 2},
     "DEMO_CT_NODULE": {"kind": "ct", "description": "очаг в лёгком", "slice_index": 3},
     "DEMO_MR_MENISCUS": {"kind": "mr", "description": "участок изменённого сигнала в мениске", "slice_index": 2},
@@ -36,13 +39,14 @@ FINDINGS = {
 
 # Archive name -> (kind, finding codes). Empty list means "no findings".
 KIT = {
-    "demo-patient-1": ("ct", ["DEMO_CT_INFILTRATE"]),
+    "demo-patient-1": ("xr", ["DEMO_XR_INFILTRATE"]),
     "demo-patient-2": ("mg", ["DEMO_MG_DENSITY"]),
     "demo-patient-3": ("ct", ["DEMO_CT_NODULE"]),
     "demo-patient-4": ("mr", ["DEMO_MR_MENISCUS"]),
-    "demo-patient-5": ("ct", ["DEMO_CT_INFILTRATE"]),
+    "demo-patient-5": ("xr", ["DEMO_XR_INFILTRATE"]),
     "demo-patient-6": ("ct", ["DEMO_CT_NODULE"]),
     "demo-patient-7": ("ct", []),
+    "upload-xr-infiltrate": ("xr", ["DEMO_XR_INFILTRATE"]),
     "upload-ct-infiltrate": ("ct", ["DEMO_CT_INFILTRATE"]),
     "upload-ct-nodule": ("ct", ["DEMO_CT_NODULE"]),
     "upload-ct-clear": ("ct", []),
@@ -50,6 +54,7 @@ KIT = {
     "upload-mg-density": ("mg", ["DEMO_MG_DENSITY"]),
     "smoke-ct": ("ct", ["DEMO_CT_INFILTRATE"]),
     "smoke-mg": ("mg", ["DEMO_MG_DENSITY"]),
+    "smoke-xr": ("xr", ["DEMO_XR_INFILTRATE"]),
 }
 
 
@@ -67,7 +72,7 @@ def picture(kind: str, index: int, variant: int) -> np.ndarray:
 
 def instance(kind: str, study_uid: str, series_uid: str, sop_uid: str, index: int, variant: int) -> bytes:
     spec = KINDS[kind]
-    sop_class = {"CT": CTImageStorage, "MR": MRImageStorage,
+    sop_class = {"CT": CTImageStorage, "MR": MRImageStorage, "DX": DigitalXRayImageStorageForPresentation,
                  "MG": DigitalMammographyXRayImageStorageForPresentation}[spec["modality"]]
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = sop_class
@@ -90,7 +95,10 @@ def instance(kind: str, study_uid: str, series_uid: str, sop_uid: str, index: in
     ds.BitsAllocated = ds.BitsStored = 16
     ds.HighBit = 15
     ds.PixelRepresentation = 0
-    ds.PixelSpacing = [spec["spacing"], spec["spacing"]]
+    if kind == "xr":  # projection X-ray: detector spacing, as real DX files usually carry
+        ds.ImagerPixelSpacing = [spec["spacing"], spec["spacing"]]
+    else:
+        ds.PixelSpacing = [spec["spacing"], spec["spacing"]]
     ds.ProtocolName = spec["protocol"]
     ds.BodyPartExamined = spec["body_part"]
     pixels = picture(kind, index, variant)
@@ -104,6 +112,9 @@ def instance(kind: str, study_uid: str, series_uid: str, sop_uid: str, index: in
         ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
         ds.ImagePositionPatient = [0, 0, 5 * index]
         ds.InstanceNumber = index + 1
+    elif kind == "xr":
+        ds.ViewPosition = "PA"
+        ds.PresentationIntentType = "FOR PRESENTATION"
     else:
         ds.ImageLaterality, ds.ViewPosition = MG_VIEWS[index]
         ds.PresentationIntentType = "FOR PRESENTATION"

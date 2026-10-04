@@ -43,9 +43,9 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 
 Манифест: `{"task": "...", "study_uid": "1.2.3", "series": {"<series_uid>": ["<sop_uid>", ...]}}`. В нём перечислен каждый ожидаемый срез или проекция. Архив с другим набором UID отклоняется.
 
-Задачи (`task`): `ct_general` (КТ, не меньше двух срезов), `mr_general` (МРТ, не меньше двух срезов), `mg_screening_2d` (маммография, ровно четыре проекции: L-CC, L-MLO, R-CC, R-MLO, только `FOR PRESENTATION`).
+Задачи (`task`): `ct_general` (КТ, не меньше двух срезов), `mr_general` (МРТ, не меньше двух срезов), `mg_screening_2d` (маммография, ровно четыре проекции: L-CC, L-MLO, R-CC, R-MLO, только `FOR PRESENTATION`), `xr_general` (рентгенограмма, с задания 09: модальность `CR` или `DX`, одна прямая проекция `PA` или `AP` и не больше одной боковой `LL`, `RL` или `LATERAL`; для `DX` — только `FOR PRESENTATION`).
 
-Требования к DICOM: Part 10; SOP-класс CT Image Storage, MR Image Storage или Digital Mammography X-Ray Image Storage — For Presentation; несжатый little endian (`1.2.840.10008.1.2` или `1.2.840.10008.1.2.1`); `ImageType` начинается с `ORIGINAL`, `PRIMARY`; один кадр; `MONOCHROME1` или `MONOCHROME2`; 8 или 16 бит; есть `PixelSpacing`. Для КТ и МРТ нужны ориентация, позиция, `InstanceNumber` и ровный шаг срезов, для КТ ещё `RescaleSlope` и `RescaleIntercept`. В архиве одно исследование, один `ProtocolName` и один `BodyPartExamined`. Лимиты: 512 файлов, 32 серии, 40 МиБ на файл, 200 МиБ после распаковки.
+Требования к DICOM: Part 10; SOP-класс CT Image Storage, MR Image Storage, Digital Mammography X-Ray Image Storage — For Presentation, Computed Radiography Image Storage или Digital X-Ray Image Storage — For Presentation; несжатый little endian (`1.2.840.10008.1.2` или `1.2.840.10008.1.2.1`); `ImageType` начинается с `ORIGINAL`, `PRIMARY`; один кадр; `MONOCHROME1` или `MONOCHROME2`; 8 или 16 бит; есть `PixelSpacing` (у рентгена вместо него допускается `ImagerPixelSpacing`). Для КТ и МРТ нужны ориентация, позиция, `InstanceNumber` и ровный шаг срезов, для КТ ещё `RescaleSlope` и `RescaleIntercept`. В архиве одно исследование, один `ProtocolName` и один `BodyPartExamined`. Лимиты: 512 файлов, 32 серии, 40 МиБ на файл, 200 МиБ после распаковки.
 
 Публичный статус: `{"id", "created_at", "status", "reason", "routing_status"}`. Черновика и находок в нём нет, но `reason` может выдать результат модели: `No supported finding above threshold` означает, что модель ничего не нашла. Пациенту и координатору причину показывать нельзя.
 
@@ -74,7 +74,7 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 
 Подтверждение, `POST /v1/review/{id}`: `{"physician_id", "conclusion", "edits": ["..."], "finding_code"}` и необязательный `"patient_ref"`. Условия: статус `awaiting_physician`; `finding_code` — один из кодов в `result.findings`; `physician_id` 1–128 символов; `conclusion` 1–4000; каждая правка до 1000; `patient_ref` по шаблону `[A-Za-z0-9_.:-]{2,128}`. Всё тело — не больше 8192 байт: заключение на 4000 кириллических символов занимает 8000 байт даже с `ensure_ascii=False`, поэтому на практике текст нужно держать заметно короче. Тело больше лимита получает 400 с пустым текстом ошибки.
 
-После подтверждения сервис сам отправляет подписанное заключение на `ROUTER_URL`. `routing_status`: `pending` → `sent` или `failed`; без `ROUTER_URL` — `not_configured_or_unsupported`. Повторной отправки нет. Ответ сервиса пути не сохраняется, поэтому `episode_id` в задании не появляется: эпизод ищут в сервисе пути по `source_report_id`, равному идентификатору задания. Соответствие модальности и `study_type`: `CT` → `ct`, `MR` → `mr`, `MG` → `mammography`.
+После подтверждения сервис сам отправляет подписанное заключение на `ROUTER_URL`. `routing_status`: `pending` → `sent` или `failed`; без `ROUTER_URL` — `not_configured_or_unsupported`. Повторной отправки нет. Ответ сервиса пути не сохраняется, поэтому `episode_id` в задании не появляется: эпизод ищут в сервисе пути по `source_report_id`, равному идентификатору задания. Соответствие модальности и `study_type`: `CT` → `ct`, `MR` → `mr`, `MG` → `mammography`, `CR` и `DX` → `xray`. Находка рентгена локализуется проекцией (`"projection": "PA"`), как у маммографии.
 
 ---
 
@@ -173,7 +173,7 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 }
 ```
 
-Правило срабатывает при точном совпадении четырёх полей и `"approved": true`. `study_type` — только `ct`, `mr`, `mammography`. Шаг правила — ровно `kind` и `description` (до 500 символов), срок пишется словами в описании. Файл читается при старте сервиса. Поставляемый `rules.json` пуст намеренно: без правил клиники каждое заключение уходит на ручной разбор. Эндпоинта для чтения правил нет.
+Правило срабатывает при точном совпадении четырёх полей и `"approved": true`. `study_type` — только `ct`, `mr`, `mammography`, `xray` (с задания 09). Шаг правила — ровно `kind` и `description` (до 500 символов), срок пишется словами в описании. Файл читается при старте сервиса. Поставляемый `rules.json` пуст намеренно: без правил клиники каждое заключение уходит на ручной разбор. Эндпоинта для чтения правил нет.
 
 Проверка файла пропускает шаг вида `manual_review` в правиле, но такой шаг нельзя ни предложить, ни завершить. В правилах его не используй.
 
@@ -197,7 +197,8 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 | `POST /v1/referrals/{id}/{accept\|reject\|cancel\|complete}` | сотрудник | `{"actor"}` и необязательный `"note"` | направление |
 | `GET /v1/clinics` | сотрудник или админ | — | `{"clinics": [...], "network_version"}`; сотрудник видит свою клинику и партнёров |
 | `GET /v1/partnerships` | сотрудник | — | `{"partners": ["clinic_id", ...]}` |
-| `GET /v1/patients?status=&limit=` | сотрудник (своя клиника) или админ | — | `{"patients": [...]}` |
+| `GET /v1/patients?status=&limit=` | сотрудник (своя клиника) или админ | — | `{"patients": [...]}`; неверные `limit` или `status` — 400 (с задания 06) |
+| `GET /v1/referrals?status=` | сотрудник | — | `{"referrals": [...]}`: направления, где клиника сотрудника — отправитель или получатель; к каждому добавлен `patient_ref` (с задания 06) |
 | `GET /v1/patients/{id}`, `GET /v1/patients/{id}/card` | сотрудник или админ с `?clinic_id=` | — | карта, оба пути отвечают одинаково |
 | `GET /v1/staff/queue` | сотрудник | — | `{"cases": [...]}` |
 | `GET /v1/staff/metrics` | сотрудник | — | показатели клиники |
@@ -233,9 +234,10 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 
 Чего нет:
 
-- HTTP-списка направлений. В хранилище метод есть (`ClinicStore.list_referrals`), маршрута нет: направления видны через карту и очередь.
 - Списка возможностей клиник в API: они только в файле сети.
-- Проверки `limit` и `status` в `GET /v1/patients`: при неверном значении соединение обрывается без ответа. Передавай `limit` целым от 1 до 500. Список — только пациенты своей клиники, не больше 500.
+- Больше 500 пациентов в `GET /v1/patients`: список — только пациенты своей клиники, `limit` от 1 до 500.
+- Истории решений по направлению: `decided_at`, `decided_by` и `decision_note` перезаписываются каждым действием.
+- Сроков ожидания у партнёров и расписаний партнёров.
 
 ### Сеть клиник (`network.json`)
 
@@ -251,7 +253,7 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 }
 ```
 
-`finding_code: "*"` означает любую находку в этой области. `direction`: `outgoing` (из `clinic_a` в `clinic_b`), `incoming`, `mutual`. `study_type` — только `ct`, `mr`, `mammography`.
+`finding_code: "*"` означает любую находку в этой области. `direction`: `outgoing` (из `clinic_a` в `clinic_b`), `incoming`, `mutual`. `study_type` — только `ct`, `mr`, `mammography`, `xray` (с задания 09).
 
 ---
 

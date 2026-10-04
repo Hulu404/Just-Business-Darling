@@ -6,8 +6,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from stand_api import (DEMO_DIR, GATEWAY, StandError, call, clinic_signed, clinic_staff, confirm, env, expect, find_episode,
-                       load_json, path_post, review, step_action, upload_kit, upload_study, utf8_console)
+from stand_api import (DEMO_DIR, GATEWAY, Gateway, StandError, call, clinic_signed, clinic_staff, confirm, env, expect,
+                       find_episode, load_json, path_get, path_post, review, step_action, upload_kit, upload_study, utf8_console)
 from synthetic_dicom import build_study
 
 HOME, PARTNER = "clinic-central", "clinic-partner-1"
@@ -162,6 +162,159 @@ def main() -> int:
         check(status == 400, f"шлюз пустил незарегистрированного пациента: {status} {foreign}")
         return "три сервиса работают, сессия пациента создаётся, чужой псевдоним отклонён"
 
+    def leaks(body: object) -> list[str]:
+        text = str(body)
+        return [w for w in ("'result'", "'draft'", "confidence", "model_version", "'reason'", "оценка") if w in text]
+
+    def step12():
+        patient = ctx["patient"] = Gateway("patient", patient_ref=ref)
+        archive = (kit_dir / load_json(kit_dir / "kit.json")["smoke-ct"]["archive"]).read_bytes()
+        status, body = patient.call("POST", "/api/patient/studies?task=ct_general&consent=1", raw=archive,
+                                    content_type="application/zip")
+        study = expect(status, body, 201, "Загрузка через шлюз")["study"]
+        check(study["status"] == "awaiting" and not leaks(body), f"ответ пациенту: {body}")
+        ctx["gw_job"] = study["id"]
+        status, body = patient.call("GET", "/api/patient/studies")
+        mine = [s for s in expect(status, body, 200, "Исследования пациента")["studies"] if s["id"] == ctx["gw_job"]]
+        check(mine and "conclusion" not in mine[0] and not leaks(body), f"до подтверждения пациент видит лишнее: {mine}")
+        status, _ = patient.call("GET", f"/api/patient/studies/{ctx['gw_job']}/images/x.png")
+        check(status == 404, f"пациент получил срез до подтверждения: {status}")
+        return "201, статус «ждёт врача», шлюз сам собрал манифест, срез пациенту закрыт"
+
+    def step13():
+        doctor = ctx["doctor"] = Gateway("doctor")
+        status, body = doctor.call("GET", "/api/doctor/studies")
+        check(any(s["id"] == ctx["gw_job"] for s in expect(status, body, 200, "Список врача")["studies"]), "врач не видит исследование")
+        status, body = doctor.call("GET", f"/api/doctor/studies/{ctx['gw_job']}")
+        study = expect(status, body, 200, "Исследование у врача")["study"]
+        check(len(study["images"]) == 3 and study["demo"] and "confidence" not in study["findings"][0], f"исследование: {study}")
+        status, png = doctor.call("GET", f"/api/doctor/studies/{ctx['gw_job']}/images/{study['findings'][0]['sop_uid']}.png")
+        check(status == 200 and isinstance(png, bytes) and png.startswith(b"\x89PNG"), f"PNG: {status}")
+        template = study["templates"]["DEMO_CT_INFILTRATE"]
+        check(template == conclusions["DEMO_CT_INFILTRATE"], "заготовка не из conclusions.demo.json")
+        status, body = doctor.call("POST", f"/api/doctor/studies/{ctx['gw_job']}/confirm", {"conclusion": template})
+        result = expect(status, body, 200, "Подтверждение через шлюз")
+        check(result["next"].get("step") == "Приём терапевта в течение 24 часов", f"что дальше: {result['next']}")
+        return f"в списке, 3 среза, PNG {len(png)} байт, подтверждено, шаг «{result['next']['step']}»"
+
+    def step14():
+        status, body = ctx["patient"].call("GET", "/api/patient/studies")
+        study = next(s for s in expect(status, body, 200, "Исследования пациента")["studies"] if s["id"] == ctx["gw_job"])
+        check(study["status"] == "confirmed" and study["conclusion"] == conclusions["DEMO_CT_INFILTRATE"], f"заключение: {study}")
+        check(study["explanation"]["seen"] != "Заключение готово." and study["episode"]["steps"][0]["status"] == "open",
+              f"объяснение или шаг: {study}")
+        check(not leaks(body), f"пациенту ушло лишнее: {leaks(body)}")
+        status, png = ctx["patient"].call("GET", f"/api/patient/studies/{ctx['gw_job']}/images/{study['image']['sop_uid']}.png")
+        check(status == 200 and png.startswith(b"\x89PNG"), f"срез пациенту: {status}")
+        return f"заключение врача, объяснение, шаг «{study['episode']['steps'][0]['description']}», срез с подписью «{study['image']['label']}»"
+
+    def step15():
+        archive, _ = build_study("ct", variant=98)
+        status, body = ctx["patient"].call("POST", "/api/patient/studies?task=ct_general&consent=1", raw=archive,
+                                           content_type="application/zip")
+        study = expect(status, body, 201, "Чужой архив через шлюз")["study"]
+        check(study["status"] == "manual", f"статус {study}")
+        staff = Gateway("staff")
+        status, body = staff.call("GET", "/api/staff/studies/manual")
+        check(any(s["id"] == study["id"] for s in expect(status, body, 200, "Ручное описание")["manual"]) and not leaks(body),
+              f"координатор не видит исследование или видит лишнее: {body}")
+        status, body = ctx["doctor"].call("GET", f"/api/doctor/studies/{study['id']}")
+        detail = expect(status, body, 200, "Ручное описание у врача")["study"]
+        check(detail["findings"] == [] and detail["reason"]["text"], f"у врача: {detail}")
+        return f"ручное описание, у координатора в группе, врачу причина: «{detail['reason']['text']}»"
+
+    def step16():
+        staff = Gateway("staff")
+        status, body = staff.call("POST", "/api/demo/studies/smoke-mg/submit", {"patient_ref": ref})
+        study = expect(status, body, 201, "Маммография через шлюз")["study"]
+        status, body = ctx["doctor"].call("GET", f"/api/doctor/studies/{study['id']}")
+        labels = [i["label"] for i in expect(status, body, 200, "Маммография у врача")["study"]["images"]]
+        check(labels == ["Проекция L-CC", "Проекция L-MLO", "Проекция R-CC", "Проекция R-MLO"], f"проекции: {labels}")
+        status, body = ctx["doctor"].call("POST", f"/api/doctor/studies/{study['id']}/confirm",
+                                          {"conclusion": conclusions["DEMO_MG_DENSITY"]})
+        nxt = expect(status, body, 200, "Подтверждение маммографии")["next"]
+        check(nxt.get("status") == "manual_review", f"что дальше: {nxt}")
+        body = expect(*staff.call("GET", f"/api/staff/episodes/{nxt['episode_id']}/route-candidates"), 200, "Кандидаты маммографии")
+        clinics = sorted(c["clinic_id"] for c in body["candidates"])
+        check(clinics == [HOME, "clinic-partner-2"], f"кандидаты маммографии: {clinics}")
+        return f"четыре проекции, после подтверждения — ручной разбор: «{nxt['reason']}»; кандидаты — своя клиника и «Опора»"
+
+    def step17():
+        staff = ctx["staff"] = Gateway("staff")
+        partner = ctx["partner"] = Gateway("partner", clinic_id=PARTNER)
+        # the referral of step 9 is still accepted: the partner closes it, so a new one can be proposed
+        old = next(r for r in expect(*partner.call("GET", "/api/partner/referrals"), 200, "Направления партнёра")["referrals"]
+                   if r["patient_ref"] == ref and r["status"] == "accepted")
+        expect(*partner.call("POST", f"/api/partner/referrals/{old['id']}/complete", {}), 200, "Завершение старого направления")
+        episode = find_episode(ctx["gw_job"])
+        ctx["gw_episode"], ctx["gw_step"] = episode["id"], episode["plan_steps"][0]["id"]
+        body = expect(*staff.call("GET", f"/api/staff/episodes/{episode['id']}/route-candidates"), 200, "Кандидаты через шлюз")
+        roles = {(c["clinic_id"], c["role"]) for c in body["candidates"]}
+        check({(HOME, "home"), (PARTNER, "partner")} <= roles, f"кандидаты: {body}")
+        body = expect(*staff.call("POST", f"/api/staff/episodes/{episode['id']}/steps/{ctx['gw_step']}/referral",
+                                  {"to_clinic_id": PARTNER, "reason": "Смоук: КТ у партнёра"}), 201, "Направление через шлюз")
+        check(body["referral"]["status"] == "proposed" and body["link"]["step_id"] == ctx["gw_step"], f"направление: {body}")
+        ctx["gw_referral"] = body["referral"]
+        return "кандидаты «у нас» и партнёр, направление создано и связано с шагом"
+
+    def step18():
+        partner, referral = ctx["partner"], ctx["gw_referral"]
+        card_route = f"/api/partner/patients/{referral['patient_id']}/card"
+        before = expect(*partner.call("GET", card_route), 200, "Карта у партнёра до принятия")
+        check(not {"full_name", "birth_date", "contact"} & set(before["patient"]) and "Внутренняя заметка" not in str(before),
+              f"партнёр видит лишнее до принятия: {before['patient']}")
+        expect(*partner.call("POST", f"/api/partner/referrals/{referral['id']}/accept", {"note": "Ждём пациента"}), 200, "Принятие")
+        after = expect(*partner.call("GET", card_route), 200, "Карта у партнёра после принятия")
+        check(after["patient"].get("full_name") == "Пациент смоук-проверки", f"после принятия: {after['patient']}")
+        return "до принятия без ФИО и внутренних записей, после принятия ФИО есть"
+
+    def step19():
+        staff, partner = ctx["staff"], ctx["partner"]
+        when = stamp(now + timedelta(days=3))
+        body = expect(*staff.call("POST", f"/api/staff/episodes/{ctx['gw_episode']}/steps/{ctx['gw_step']}/confirm",
+                                  {"partner_time": when, "partner_clinic_id": PARTNER}), 200, "Запись у партнёра")
+        step = next(s for s in body["episode"]["steps"] if s["id"] == ctx["gw_step"])
+        check(step["status"] == "confirmed", f"шаг после записи: {step}")
+        before = len(path_get(f"/v1/episodes/{ctx['gw_episode']}")["audit_events"])
+        expect(*partner.call("POST", f"/api/partner/referrals/{ctx['gw_referral']['id']}/complete", {}), 200, "Услуга оказана")
+        check(len(path_get(f"/v1/episodes/{ctx['gw_episode']}")["audit_events"]) == before, "завершение у партнёра изменило эпизод")
+        refs = expect(*staff.call("GET", "/api/staff/referrals"), 200, "Направления координатора")["referrals"]
+        mine = next(r for r in refs if r["id"] == ctx["gw_referral"]["id"])
+        check(mine["status"] == "completed" and mine["link"] == {"episode_id": ctx["gw_episode"], "step_id": ctx["gw_step"]},
+              f"направление у координатора: {mine}")
+        body = expect(*staff.call("POST", f"/api/staff/episodes/{ctx['gw_episode']}/steps/{ctx['gw_step']}/attend", {}), 200, "Визит")
+        check(next(s for s in body["episode"]["steps"] if s["id"] == ctx["gw_step"])["status"] == "attended", "визит не отмечен")
+        return "время партнёра записано, «услуга оказана» не тронула эпизод, координатор отметил визит сам"
+
+    def step20():
+        body = expect(*Gateway("staff").call("POST", "/api/staff/rules/dry-run", {"study_type": "xray", "anatomy": "CHEST",
+                      "protocol_name": "CHEST_PA", "finding_code": "DEMO_XR_INFILTRATE"}), 200, "Песочница правил")
+        check(body["manual_reason"] is None and [s["description"] for s in body["steps"]] == ["Приём терапевта в течение 24 часов"],
+              f"песочница: {body}")
+        return "рентген грудной клетки → «Приём терапевта в течение 24 часов» по утверждённому правилу"
+
+    def step21():
+        patient = Gateway("patient", patient_ref=ref)
+        archive = (kit_dir / load_json(kit_dir / "kit.json")["smoke-xr"]["archive"]).read_bytes()
+        study = expect(*patient.call("POST", "/api/patient/studies?task=xr_general&consent=1", raw=archive,
+                                     content_type="application/zip"), 201, "Рентген через шлюз")["study"]
+        check(study["status"] == "awaiting", f"статус рентгена: {study}")
+        doctor = Gateway("doctor")
+        detail = expect(*doctor.call("GET", f"/api/doctor/studies/{study['id']}"), 200, "Рентген у врача")["study"]
+        check([i["label"] for i in detail["images"]] == ["Проекция PA"] and detail["findings"][0]["place"] == "Проекция PA",
+              f"рентген у врача: {detail['images']}, {detail['findings']}")
+        status, png = doctor.call("GET", f"/api/doctor/studies/{study['id']}/images/{detail['images'][0]['sop_uid']}.png")
+        check(status == 200 and png.startswith(b"\x89PNG"), f"PNG рентгена: {status}")
+        nxt = expect(*doctor.call("POST", f"/api/doctor/studies/{study['id']}/confirm",
+                                  {"conclusion": detail["templates"]["DEMO_XR_INFILTRATE"]}), 200, "Подтверждение рентгена")["next"]
+        check(nxt.get("step") == "Приём терапевта в течение 24 часов", f"что дальше: {nxt}")
+        episode = find_episode(study["id"])
+        check(episode["source_report"]["study_type"] == "xray", f"study_type: {episode['source_report']['study_type']}")
+        mine = next(s for s in expect(*patient.call("GET", "/api/patient/studies"), 200, "Исследования")["studies"] if s["id"] == study["id"])
+        check(mine["title"] == "Рентгенография органов грудной клетки" and mine["explanation"]["seen"].startswith("В нижней части правого лёгкого"),
+              f"у пациента: {mine['title']}, {mine['explanation']}")
+        return "проекция PA, PNG, подтверждение → study_type xray → «Приём терапевта в течение 24 часов», объяснение у пациента"
+
     steps = [("Регистрация пациента в сервисе клиники", step1),
              ("Загрузка учебной КТ", step2),
              ("Загрузка КТ не из учебного набора", step3),
@@ -172,7 +325,17 @@ def main() -> int:
              ("Отказ и пересмотр плана", step8),
              ("Направление партнёру", step9),
              ("Учебная маммография без утверждённого правила", step10),
-             ("Шлюз", step11)]
+             ("Шлюз", step11),
+             ("Пациент загружает учебную КТ через шлюз", step12),
+             ("Врач: список, срез PNG, подтверждение", step13),
+             ("Пациент видит заключение, объяснение и шаг", step14),
+             ("Архив не из учебного набора через шлюз", step15),
+             ("Маммография через шлюз", step16),
+             ("Кандидаты и направление через шлюз", step17),
+             ("Партнёр принимает направление", step18),
+             ("Запись у партнёра, услуга оказана, визит", step19),
+             ("Песочница правил: рентген", step20),
+             ("Рентгенограмма через шлюз до шага плана", step21)]
     print(f"Смоук-проверка на пациенте {ref}", flush=True)
     for number, (title, run) in enumerate(steps, 1):
         try:

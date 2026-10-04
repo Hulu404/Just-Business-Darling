@@ -1,4 +1,4 @@
-import { CATS, DEMO, PARTNERS, PHARMACIES, PRODUCTS, RX_STOCK, SCHEME, scenarios, slotsFor } from '../demo-data.js';
+import { CATS, DEMO, PHARMACIES, PRODUCTS, RX_STOCK, scenarios, slotsFor } from '../demo-data.js';
 import { addLog, byKey, currentStep, ep, mkStep, myEpisodes, refKey, slotFull, slotLine, studyOf, title, whereBadge, wherePartner } from '../domain.js';
 import { icon } from '../icons.js';
 import { patientName, state } from '../state.js';
@@ -61,50 +61,13 @@ export function home(){
     <div class="note" style="margin-top:20px">Сервис помогает организовать обращение. Если ситуация требует срочной помощи, обратитесь в экстренные службы по номерам 103 или 112.</div>`;
 }
 
-/* ---------- Что на снимке ---------- */
-export function patientStudy(st){
-  const d = DEMO[st.kind];
-  const head = (b, tone) => `${badge(b, tone)}<h2 style="margin-top:11px">${d.title}</h2><p>${safe(st.source)} · ${safe(st.date)}${st.file ? ` · файл «${safe(st.file)}»` : ''}</p>`;
-  if (st.status === 'processing' || st.status === 'awaiting'){
-    const stage = st.status === 'processing' ? 1 : 2;
-    const names = ['Файлы приняты', 'ИИ готовит черновик', 'Врач проверяет', 'Результат и план'];
-    return `<div class="panel">${head(st.status === 'processing' ? 'Обрабатывается' : 'Ждёт врача', 'blue')}<div class="steps" style="margin:18px 0 14px">${names.map((n, i) => `${i ? '<span class="sep"></span>' : ''}<span class="step ${i <= stage ? 'on' : ''}"><b>${i + 1}</b>${n}</span>`).join('')}</div><p style="margin:0">${st.status === 'processing' ? 'Проверяем файлы и готовим черновик заключения.' : 'Черновик готов, его проверяет врач-рентгенолог. Результат и план появятся здесь, а мы пришлём сообщение. Обычно это занимает до двух часов.'}</p></div>`;
-  }
-  if (st.status === 'manual') return `<div class="panel">${head('Врач описывает сам', 'orange')}<p style="margin:0">Врач решил описать этот снимок без черновика ИИ. Заключение появится здесь, и мы пришлём сообщение.</p></div>`;
-  // Задание 05 подключит исследования к сервису; демо-исследование не ведёт к настоящему эпизоду.
-  const nx = {head:'Демо-исследование', text:'Маршрут по этому снимку пока недоступен на стенде.', buttons:''};
-  return `<div class="panel">${head('Подтверждено врачом')}
-    <div class="explain">
-      <div class="viewer">${SCHEME[d.scheme](d.findings.length > 0)}<div class="cap"><span>${d.findings.length ? 'Схема: где врач отметил изменение' : 'Схема снимка'}</span><span>Не медицинское изображение</span></div></div>
-      <div class="stack">
-        <div><div class="eyebrow">Что увидели</div><p class="plain">${d.seen}</p></div>
-        <div><div class="eyebrow">Что это значит</div><p class="plain">${d.means}</p></div>
-        <div class="resultmain" style="padding:20px"><div class="eyebrow">Что дальше</div><strong style="font-size:20px">${safe(nx.head)}</strong><p style="margin:7px 0 0">${safe(nx.text)}</p>${nx.buttons ? `<div class="actions" style="margin-top:14px">${nx.buttons}</div>` : ''}</div>
-      </div>
-    </div>
-    <details class="more"><summary>Заключение врача полностью</summary><div class="quote">${safe(st.conclusion).replace(/\n+/g, '<br>')}<br><br><span class="muted">${safe(st.confirmedBy)}, подтверждено ${safe(st.confirmedAt)}</span></div></details>
-  </div>`;
-}
-export function imaging(){
-  const list = state.studies.filter(s => s.mine);
-  return `<div class="pagehead"><div><div class="eyebrow">Сервис «Что на снимке?»</div><h1>Мои исследования</h1><p>Заключение появляется здесь после того, как его подтвердил врач. Рядом — объяснение простыми словами и следующий шаг.</p></div><div class="actions">${btn(icon('plus') + 'Загрузить снимок', 'uploadOpen')}</div></div>
-    <div class="stack">${list.map(patientStudy).join('') || '<div class="panel empty"><h3>Исследований пока нет</h3><p>Загрузите снимок или заключение из другой клиники.</p></div>'}</div>
-    <div class="note" style="margin-top:18px">ИИ не ставит диагноз. Он помогает врачу описать снимок, а нам — подобрать следующий шаг. Заключение всегда подтверждает врач. Объяснения в демо условные: в продукте их тексты утверждает клиника.</div>`;
-}
-export function uploadModal(){
-  openModal(`${modalHead('Сервис «Что на снимке?»', 'Загрузить снимок или заключение')}
-    <p>Подойдёт исследование из другой клиники. ИИ подготовит черновик, врач его проверит, и вы получите объяснение и план.</p>
-    <div class="field"><label for="upKind">Что за исследование</label><select id="upKind"><option value="xray">Рентгенография</option><option value="ct">КТ</option><option value="mg">Маммография</option><option value="mri">МРТ</option></select></div>
-    <div class="field" style="margin-top:14px"><label for="upFile">Файл</label><input id="upFile" type="file" accept=".zip,.dcm,.pdf,image/*"><small>Архив DICOM, PDF или фото заключения. В демо файл никуда не отправляется: сохраняется только его имя.</small></div>
-    <label class="checkline" style="margin-top:14px"><input type="checkbox" id="upConsent"><span>Разрешаю передать исследование врачу клиники «Линия здоровья» для описания</span></label>
-    <div class="actions"><button class="btn" disabled>Отправить врачу</button><span class="muted">Пока недоступно на стенде</span>${btn('Отмена', 'close', 'secondary')}</div>`);
-}
+/* ---------- Что на снимке: экраны в imaging-ui.js ---------- */
 
 /* ---------- Мой план ---------- */
 export function visitDay(s){
   if (!s.slot) return '';
   if (s.slot.format === 'Онлайн') return '<strong>В день визита.</strong> Ссылка на видеоприём придёт сюда и в SMS за 15 минут до начала.';
-  if (s.slot.partner) return `<strong>В день визита.</strong> ${safe(PARTNERS[s.slot.partner].name)} — партнёр клиники. Направление и заключение уже там, с собой нужен только паспорт. Результат вернётся в ваш план.`;
+  if (s.slot.partner) return `<strong>В день визита.</strong> ${safe(s.slot.place)} — партнёр клиники. Направление и заключение уже там, с собой нужен только паспорт. Результат вернётся в ваш план.`;
   return `<strong>В день визита.</strong> ${safe(s.slot.place)}: регистратура на первом этаже, затем ${ROOMS[s.service] || 'кабинет укажем в напоминании'}. Приходите за 10 минут, с собой паспорт и полис.${s.service === 'labs' ? ' Как подготовиться к анализам, напишем в напоминании.' : ''}`;
 }
 export function planStep(e, s, isCur, isLast){
@@ -177,7 +140,7 @@ export function slotAskModal(key, slotId, mode){
   const x = slotsFor(s.service).find(z => z.id === slotId);
   const heads = {patient:'Подтверждение записи', offer:'Предложить время пациенту', staff:'Записать по звонку'};
   openModal(`${modalHead(heads[mode], `${safe(x.date)}, ${safe(x.time)}`)}<p><strong style="color:var(--ink)">${safe(title(s))}</strong><br>${safe(x.who)}<br>${safe(x.place)} · ${safe(x.format)} · ${safe(x.price)}</p>
-    ${x.partner ? `<div class="note" style="margin-bottom:12px"><strong>${safe(PARTNERS[x.partner].name)}</strong> — партнёр клиники. ${mode === 'patient' ? 'Мы передадим туда направление и заключение по снимку, а результат вернётся в ваш план.' : 'Партнёр получит направление и заключение, результат вернётся в эпизод.'}</div>` : ''}
+    ${x.partner ? `<div class="note" style="margin-bottom:12px"><strong>${safe(x.place)}</strong> — партнёр клиники. ${mode === 'patient' ? 'Мы передадим туда направление и заключение по снимку, а результат вернётся в ваш план.' : 'Партнёр получит направление и заключение, результат вернётся в эпизод.'}</div>` : ''}
     <div class="note">${mode === 'offer' ? 'Пациент получит сообщение с кнопкой подтверждения. В демо оно появится в режиме пациента.' : 'Это демонстрационная запись. В расписание клиники она не попадает.'}</div>
     <div class="actions">${btn(mode === 'offer' ? 'Отправить предложение' : 'Подтвердить', 'slotConfirm', '', {key, slot:slotId, mode})}${btn('Назад', 'close', 'secondary')}</div>`);
 }
