@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from catalog import STUDY_NAMES, STUDY_TYPE_LABELS
+
 log = logging.getLogger(__name__)
 
 MANUAL_REASONS = {
@@ -20,6 +22,12 @@ MANUAL_REASONS = {
 KNOWN_EPISODE_STATUSES = {"active", "manual_review", "paused", "completed", "closed"}
 KNOWN_STEP_STATUSES = {"open", "offered", "confirmed", "attended", "completed", "cancelled", "refused",
                        "lost_contact", "superseded", "closed"}
+
+
+def study_title(report: dict) -> str:
+    """«Рентгенография органов грудной клетки», «КТ» — never the raw study_type code."""
+    kind = report.get("study_type")
+    return STUDY_NAMES.get((kind, report.get("anatomy"))) or STUDY_TYPE_LABELS.get(kind) or kind or "Исследование"
 
 
 def reason_text(reason: str | None) -> str:
@@ -66,7 +74,7 @@ def patient_episode(raw: dict, explanation: dict | None = None) -> dict:
         log.warning("Unknown path episode status: %s", status)
     report = raw.get("source_report") or {}
     result = {key: raw.get(key) for key in ("id", "status", "created_at", "updated_at")}
-    result["title"] = report.get("study_type") or "Исследование"
+    result["title"] = study_title(report)
     result["conclusion"] = report.get("conclusion")
     result["explanation"] = explanation if explanation else {
         "seen": "Заключение готово.", "means": "Врач объяснит результат на приёме"}
@@ -82,7 +90,7 @@ def staff_episode(raw: dict, name: str, *, callback: bool = False) -> dict:
     result = {key: raw.get(key) for key in ("id", "status", "created_at", "updated_at", "rule_version")}
     result["patient_ref"] = report.get("patient_ref")
     result["patient"] = name or "Пациент не указан"
-    result["title"] = report.get("study_type") or "Исследование"
+    result["title"] = study_title(report)
     result["reason"] = reason_text(raw.get("manual_reason")) if status in {"manual_review", "paused"} else ""
     result["callback"] = callback
     result["steps"] = [_step(s, patient=False) for s in raw.get("plan_steps", [])]

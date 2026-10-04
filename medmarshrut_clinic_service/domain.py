@@ -10,7 +10,7 @@ REFERRAL_STATUSES = {"proposed", "accepted", "rejected", "cancelled", "completed
 ANAMNESIS_KINDS = {"diagnosis", "allergy", "medication", "surgery", "family_history",
                    "risk_factor", "note", "measurement", "lab"}
 AUTHOR_ROLES = {"physician", "coordinator", "nurse", "system"}
-STUDY_TYPES = {"ct", "mr", "mammography"}
+STUDY_TYPES = {"ct", "mr", "mammography", "xray"}
 
 
 @dataclass(frozen=True)

@@ -286,6 +286,13 @@ def main() -> int:
         check(next(s for s in body["episode"]["steps"] if s["id"] == ctx["gw_step"])["status"] == "attended", "визит не отмечен")
         return "время партнёра записано, «услуга оказана» не тронула эпизод, координатор отметил визит сам"
 
+    def step20():
+        body = expect(*Gateway("staff").call("POST", "/api/staff/rules/dry-run", {"study_type": "xray", "anatomy": "CHEST",
+                      "protocol_name": "CHEST_PA", "finding_code": "DEMO_XR_INFILTRATE"}), 200, "Песочница правил")
+        check(body["manual_reason"] is None and [s["description"] for s in body["steps"]] == ["Приём терапевта в течение 24 часов"],
+              f"песочница: {body}")
+        return "рентген грудной клетки → «Приём терапевта в течение 24 часов» по утверждённому правилу"
+
     steps = [("Регистрация пациента в сервисе клиники", step1),
              ("Загрузка учебной КТ", step2),
              ("Загрузка КТ не из учебного набора", step3),
@@ -304,7 +311,8 @@ def main() -> int:
              ("Маммография через шлюз", step16),
              ("Кандидаты и направление через шлюз", step17),
              ("Партнёр принимает направление", step18),
-             ("Запись у партнёра, услуга оказана, визит", step19)]
+             ("Запись у партнёра, услуга оказана, визит", step19),
+             ("Песочница правил: рентген", step20)]
     print(f"Смоук-проверка на пациенте {ref}", flush=True)
     for number, (title, run) in enumerate(steps, 1):
         try:

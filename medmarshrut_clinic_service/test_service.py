@@ -128,6 +128,18 @@ class ClinicServiceTests(unittest.TestCase):
         with self.assertRaises(ConflictError):
             self.store.create_referral(patient.id, "clinic-a", "clinic-b", "archived patient", "doc-1")
 
+    def test_xray_capability_is_a_route_candidate(self):
+        path = self.root / "xray-network.json"
+        path.write_text(json.dumps({"version": "test-xray", "clinics": [{"id": "clinic-a", "name": "A", "network": "net", "active": True}],
+            "capabilities": [{"clinic_id": "clinic-a", "study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA",
+                              "finding_code": "*", "approved": True}], "partnerships": []}), encoding="utf-8")
+        store = ClinicStore(self.root / "xray.sqlite3", ClinicNetwork(path))
+        self.addCleanup(store.close)
+        store.create_patient("clinic-a", patient_payload())
+        result = store.route_candidates("patient-1", {"study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA",
+                                                      "finding_code": "XR_FINDING"})
+        self.assertEqual([c["clinic_id"] for c in result["candidates"]], ["clinic-a"])
+
     def test_hmac_helper(self):
         
         self.assertTrue(verify(SECRET, "1000000000", signature(SECRET, "1000000000", b"{}"), b"{}",

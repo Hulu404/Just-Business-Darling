@@ -78,6 +78,18 @@ class PathServiceTests(unittest.TestCase):
         self.assertEqual(closed.status, "completed")
         self.assertEqual(len(closed.audit_events), 6)
 
+    def test_xray_rule_routes_an_xray_report(self):
+        self.rules_path.write_text(json.dumps({"version": "clinic-test-xray",
+            "supported_protocols": [{"study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA"}],
+            "rules": [{"study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA",
+                "finding_code": "XR_FINDING", "approved": True,
+                "steps": [{"kind": "appointment", "description": "Therapist within 24 hours"}]}]}), encoding="utf-8")
+        store = EpisodeStore(self.root / "xray.sqlite3", Ruleset(self.rules_path))
+        self.addCleanup(store.close)
+        episode, _ = store.ingest(report(study_type="xray", anatomy="CHEST", protocol_name="CHEST_PA", finding_code="XR_FINDING"))
+        self.assertEqual(episode.status, "active")
+        self.assertEqual(episode.plan_steps[0].description, "Therapist within 24 hours")
+
     def test_unconfirmed_unknown_and_protocol_are_manual(self):
         with self.assertRaisesRegex(PathError, "physician-confirmed"):
             self.store.ingest(report(confirmation_status="draft"))
