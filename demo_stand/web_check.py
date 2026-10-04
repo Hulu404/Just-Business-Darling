@@ -205,6 +205,8 @@ def check_imaging(browser) -> list[str]:
         failures.append("нет плашки демо-сценария")
     if "Оценка модели" in doctor.inner_text("#view"):
         failures.append("в демо-сценарии видна оценка модели")
+    if doctor.query_selector("[data-action=studyRewrite]"):
+        failures.append("без ключа API у врача видна кнопка ИИ-помощника")
     doctor.click("[data-action=studyStep][data-step='1']")
     doctor.wait_for_selector("img.studyimg[src^='blob:']")
     doctor.click("[data-action=studyConfirm]")
@@ -217,6 +219,8 @@ def check_imaging(browser) -> list[str]:
             failures.append(f"пациенту видно «{word}»")
     if not patient.query_selector("[data-action=pathChoose]"):
         failures.append("у пациента нет кнопки записи")
+    if patient.query_selector("[data-action=studyExplain]") or "ИИ-помощник" in text:
+        failures.append("без ключа API у пациента видна кнопка ИИ-помощника")
     if patient_errors or doctor_errors:
         failures.append("ошибки в консоли: " + "; ".join(patient_errors + doctor_errors))
     context.close()

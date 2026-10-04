@@ -119,17 +119,18 @@ class GatewayStore:
             with self.db.cursor() as cur:
                 cur.execute("SELECT to_regclass('services'), to_regclass('finding_texts'), "
                             "to_regclass('slots'), to_regclass('appointments'), to_regclass('study_registry'), "
-                            "to_regclass('referral_links')")
+                            "to_regclass('referral_links'), to_regclass('assistant_texts')")
                 if not all(cur.fetchone()):
                     raise StoreError("Миграция шлюза не применена. Запустите migrate.py apply для выбранной схемы.")
-                cur.execute("""SELECT count(*)=10 AND bool_and(
+                cur.execute("""SELECT count(*)=11 AND bool_and(
                                has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'SELECT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'INSERT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'UPDATE')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'DELETE'))
                                FROM pg_tables WHERE schemaname=%s AND tablename IN
                                 ('services','service_followups','finding_texts','slots','appointments',
-                                'threads','messages','outcome_submissions','study_registry','referral_links')""",
+                                'threads','messages','outcome_submissions','study_registry','referral_links',
+                                'assistant_texts')""",
                             (self.schema, self.schema, self.schema, self.schema, self.schema))
                 if not cur.fetchone()[0]:
                     raise StoreError("Серверной роли нужны права чтения и записи таблиц шлюза.")
@@ -142,7 +143,7 @@ class GatewayStore:
         """Clean data tied to IDs of the freshly recreated core services."""
         with self.transaction() as cur:
             for table in ("messages", "threads", "appointments", "slots", "outcome_submissions", "study_registry",
-                          "referral_links"):
+                          "referral_links", "assistant_texts"):
                 cur.execute(f"DELETE FROM {table}")
 
     def seed_catalog(self, clinic_id: str) -> None:
@@ -378,6 +379,20 @@ class GatewayStore:
                 cur.execute("SELECT referral_id, episode_id, step_id FROM referral_links WHERE referral_id = ANY(%s)",
                             (list(referral_ids),))
             return {row[0]: {"episode_id": row[1], "step_id": row[2]} for row in cur.fetchall()}
+
+    def assistant_text(self, job_id: str, input_hash: str) -> str | None:
+        with self.transaction(read_only=True) as cur:
+            cur.execute("SELECT body FROM assistant_texts WHERE job_id=%s AND input_hash=%s", (job_id, input_hash))
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def save_assistant_text(self, job_id: str, input_hash: str, model: str, body: str) -> str:
+        """Idempotent: two windows asking at once keep the first stored text."""
+        with self.transaction() as cur:
+            cur.execute("""INSERT INTO assistant_texts (job_id, input_hash, model, body) VALUES (%s,%s,%s,%s)
+                           ON CONFLICT (job_id, input_hash) DO NOTHING""", (job_id, input_hash, model, body))
+            cur.execute("SELECT body FROM assistant_texts WHERE job_id=%s AND input_hash=%s", (job_id, input_hash))
+            return cur.fetchone()[0]
 
     def outcome_timestamp(self, event_id: str, episode_id: str, step_id: str,
                           physician_id: str, content: dict) -> str:

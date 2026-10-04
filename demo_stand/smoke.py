@@ -315,6 +315,26 @@ def main() -> int:
               f"у пациента: {mine['title']}, {mine['explanation']}")
         return "проекция PA, PNG, подтверждение → study_type xray → «Приём терапевта в течение 24 часов», объяснение у пациента"
 
+    def step22():
+        # the stand gives no API key to checks: the assistant is off, and nothing else changes
+        patient, doctor = Gateway("patient", patient_ref=ref), Gateway("doctor")
+        status = expect(*patient.call("GET", "/api/assistant/status"), 200, "Состояние помощника")
+        check(status == {"enabled": False}, f"помощник на смоуке: {status}")
+        archive = (kit_dir / load_json(kit_dir / "kit.json")["smoke-xr"]["archive"]).read_bytes()
+        study = expect(*patient.call("POST", "/api/patient/studies?task=xr_general&consent=1", raw=archive,
+                                     content_type="application/zip"), 201, "Рентген для помощника")["study"]
+        detail = expect(*doctor.call("GET", f"/api/doctor/studies/{study['id']}"), 200, "Рентген у врача")["study"]
+        template = detail["templates"]["DEMO_XR_INFILTRATE"]
+        code, body = doctor.call("POST", f"/api/doctor/studies/{study['id']}/assistant/rewrite",
+                                 {"finding_code": "DEMO_XR_INFILTRATE", "text": template})
+        check(code == 503 and body["error"]["code"] == "assistant_unavailable", f"помощник без ключа: {code} {body}")
+        nxt = expect(*doctor.call("POST", f"/api/doctor/studies/{study['id']}/confirm", {"conclusion": template}),
+                     200, "Подтверждение без помощника")["next"]
+        check(nxt.get("step") == "Приём терапевта в течение 24 часов", f"что дальше: {nxt}")
+        code, body = patient.call("POST", f"/api/patient/studies/{study['id']}/assistant/explain", {})
+        check(code == 503 and body["error"]["code"] == "assistant_unavailable", f"пояснение без ключа: {code} {body}")
+        return "выключен, «Улучшить формулировку» — 503, подтверждение прошло, шаг тот же, пояснение — 503"
+
     steps = [("Регистрация пациента в сервисе клиники", step1),
              ("Загрузка учебной КТ", step2),
              ("Загрузка КТ не из учебного набора", step3),
@@ -335,7 +355,8 @@ def main() -> int:
              ("Партнёр принимает направление", step18),
              ("Запись у партнёра, услуга оказана, визит", step19),
              ("Песочница правил: рентген", step20),
-             ("Рентгенограмма через шлюз до шага плана", step21)]
+             ("Рентгенограмма через шлюз до шага плана", step21),
+             ("ИИ-помощник без ключа", step22)]
     print(f"Смоук-проверка на пациенте {ref}", flush=True)
     for number, (title, run) in enumerate(steps, 1):
         try:

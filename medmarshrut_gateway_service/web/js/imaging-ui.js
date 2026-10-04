@@ -14,7 +14,8 @@ export const isImagingPage = () => (HERE[state.role] || []).includes(state.page)
 export const isImagingListPage = () => isImagingPage() && state.page !== 'study';
 
 const data = {role:null, page:null, status:'loading', message:'', items:[], detail:null, detailId:null,
-              manual:[], notRouted:[], kit:null, index:0, drafts:{}, code:null, busy:false};
+              manual:[], notRouted:[], kit:null, index:0, drafts:{}, code:null, busy:false,
+              assistant:null, suggest:null, suggesting:false, explain:{}};  // задание 11: ИИ-помощник
 const blobs = new Map();
 const known = new Set();  // идентификаторы из списка врача: старый выбор из демо-состояния в шлюз не уходит
 const enc = encodeURIComponent;
@@ -35,7 +36,10 @@ export async function refreshImaging(){
   }
   const id = state.sel.study;
   const fresh = data.role !== role || data.page !== page || (page === 'study' && data.detailId !== id);
-  if (fresh){ Object.assign(data, {role, page, status:'loading', message:''}); if (page === 'study') Object.assign(data, {detail:null, detailId:id, index:0, drafts:{}, code:null}); render(); }
+  if (fresh){ Object.assign(data, {role, page, status:'loading', message:''}); if (page === 'study') Object.assign(data, {detail:null, detailId:id, index:0, drafts:{}, code:null, suggest:null}); render(); }
+  /* Без ключа в шлюзе кнопок помощника нет; ошибка запроса — тоже «выключен», экран работает как раньше */
+  if (data.assistant === null && (page === 'imaging' || page === 'study'))
+    data.assistant = await api('GET', '/api/assistant/status', {role}).then(r => r.enabled === true, () => false);
   try {
     if (page === 'imaging') data.items = (await api('GET', '/api/patient/studies', {role})).studies || [];
     else if (page === 'reading'){ data.items = remember((await api('GET', '/api/doctor/studies', {role})).studies || []); state.readingCount = data.items.filter(s => s.status === 'awaiting_physician').length; }
@@ -96,11 +100,20 @@ function patientCard(st){
       <div class="stack">
         <div><div class="eyebrow">Что увидели</div><p class="plain">${safe(st.explanation?.seen)}</p></div>
         <div><div class="eyebrow">Что это значит</div><p class="plain">${safe(st.explanation?.means)}</p></div>
+        ${explainBlock(st)}
         <div class="resultmain" style="padding:20px"><div class="eyebrow">Что дальше</div><strong style="font-size:20px">${safe(nx.head)}</strong>${nx.text ? `<p style="margin:7px 0 0">${safe(nx.text)}</p>` : ''}${nx.buttons ? `<div class="actions" style="margin-top:14px">${nx.buttons}</div>` : ''}</div>
       </div>
     </div>
     <details class="more"><summary>Заключение врача полностью</summary><div class="quote">${safe(st.conclusion).replace(/\n+/g, '<br>')}<br><br><span class="muted">Подтверждено ${safe(fmt(st.confirmed_at))}</span></div></details>
   </div>`;
+}
+/* Пояснение помощника — под утверждённым текстом клиники, не вместо него */
+function explainBlock(st){
+  if (!data.assistant) return '';
+  const e = data.explain[st.id];
+  if (e?.status === 'ok') return `<div class="note"><div class="eyebrow">Пояснение ИИ-помощника. Это не заключение врача</div><p class="plain" style="margin:6px 0 0">${safe(e.text).replace(/\n+/g, '<br>')}</p><p style="margin:8px 0 0"><strong>Вопросы по результату задайте врачу.</strong></p></div>`;
+  if (e?.status === 'error') return errorNote(e.message, 'studyExplain', {id:st.id});
+  return `<div class="actions" style="margin-top:0">${btn(e?.status === 'loading' ? 'Готовим объяснение…' : 'Объяснить подробнее', 'studyExplain', 'secondary small', {id:st.id})}</div>`;
 }
 export function imagingPage(){
   const intro = head('Мои исследования', 'Заключение появляется здесь после того, как его подтвердил врач. Рядом — объяснение простыми словами и следующий шаг.', btn(icon('plus') + 'Загрузить снимок', 'uploadOpen'));
@@ -161,8 +174,11 @@ function draftPanel(st){
   const choose = codes.length > 1 ? `<div class="field"><label>Какой признак вы подтверждаете</label>${st.findings.filter(f => codes.includes(f.code)).map(f => `<label class="checkline" style="margin-bottom:8px"><input type="radio" name="studyCode" value="${safe(f.code)}" data-action="studyCode" data-code="${safe(f.code)}" ${f.code === code ? 'checked' : ''}><span><strong>${safe(f.description)}</strong><br><span class="muted">${safe(f.place)}</span></span></label>`).join('')}</div>` : '';
   return `<div class="panel"><h3>Черновик заключения</h3>${choose}
     <div class="field"><textarea id="studyDraft" data-code="${safe(code)}" maxlength="${MAX_TEXT}" style="min-height:190px" aria-label="Текст заключения">${safe(text)}</textarea><small><span id="draftCount">${text.length}</span> из ${MAX_TEXT} символов. Заготовка без оценок модели: прочитайте, исправьте и подтвердите.</small></div>
-    <div class="actions">${btn(data.busy ? 'Подтверждаем…' : 'Подтвердить заключение', 'studyConfirm', '', {id:st.id, code})}</div></div>`;
+    <div class="actions">${btn(data.busy ? 'Подтверждаем…' : 'Подтвердить заключение', 'studyConfirm', '', {id:st.id, code})}${data.assistant ? btn(data.suggesting ? 'Готовим вариант…' : 'Улучшить формулировку', 'studyRewrite', 'secondary', {id:st.id, code}) : ''}</div>
+    ${data.suggest && data.suggest.code === code ? suggestNote(data.suggest.text) : ''}</div>`;
 }
+/* Вариант помощника не попадает в поле сам: только по кнопке «Подставить» */
+const suggestNote = text => `<div class="note" style="margin-top:14px"><div class="eyebrow">Черновик ИИ-помощника</div><p style="margin:6px 0 0">${safe(text).replace(/\n+/g, '<br>')}</p><p class="muted" style="font-size:13px;margin:8px 0 0">Прочитайте перед тем, как подставить. Заключение подтверждаете вы.</p><div class="actions" style="margin-top:12px">${btn('Подставить', 'studySuggestUse', 'small')}${btn('Не нужно', 'studySuggestDrop', 'secondary small')}</div></div>`;
 function afterPanel(st){
   const c = st.confirmation, n = st.next || {};
   const caseBtn = n.episode_id ? `<button class="btn secondary small" data-case="${safe(n.episode_id)}">Открыть обращение</button>` : '';
@@ -257,6 +273,29 @@ export function installImagingActions(actions){
     data.detailId = null;
     toast('Заключение подтверждено');
     await refreshImaging();
+  };
+  actions.studyRewrite = async d => {
+    const text = $('#studyDraft')?.value || '';
+    if (!text.trim()) return toast('Поле пустое. Напишите хотя бы несколько слов, и помощник предложит формулировку.');
+    if (data.suggesting) return;
+    data.drafts[d.code] = text;
+    data.suggesting = true; render();
+    try {
+      const r = await api('POST', `/api/doctor/studies/${enc(d.id)}/assistant/rewrite`, {role:'doctor', body:{finding_code:d.code, text}});
+      data.suggest = {code:d.code, text:r.suggestion};
+    } catch (err){ toast(err.message); }
+    data.suggesting = false; render();
+  };
+  actions.studySuggestUse = () => { if (!data.suggest) return; data.drafts[data.suggest.code] = data.suggest.text; data.suggest = null; render(); };
+  actions.studySuggestDrop = () => { data.suggest = null; render(); };
+  actions.studyExplain = async d => {
+    if (data.explain[d.id]?.status === 'loading') return;
+    data.explain[d.id] = {status:'loading'}; render();
+    try {
+      const r = await api('POST', `/api/patient/studies/${enc(d.id)}/assistant/explain`, {role:'patient', body:{}});
+      data.explain[d.id] = {status:'ok', text:r.explanation};
+    } catch (err){ data.explain[d.id] = {status:'error', message:'Не получилось подготовить объяснение. ' + err.message}; }
+    render();
   };
 }
 

@@ -2,6 +2,7 @@
 (and GATEWAY_TEST_SUPABASE_PROJECT_REF, or "local" for 127.0.0.1); otherwise skipped."""
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 import unittest
@@ -12,6 +13,18 @@ from store import GatewayStore, StoreConflict
 
 DSN = os.environ.get("GATEWAY_TEST_DATABASE_URL", "")
 REF = os.environ.get("GATEWAY_TEST_SUPABASE_PROJECT_REF", "local")
+
+
+class MigrationDigestTests(unittest.TestCase):
+    """No database: git with core.autocrlf gives a migration as LF or CRLF, and both are the same migration."""
+
+    def test_line_endings_do_not_change_a_migration(self):
+        lf, crlf = b"CREATE TABLE t (id int);\nSELECT 1;\n", b"CREATE TABLE t (id int);\r\nSELECT 1;\r\n"
+        self.assertEqual(migrate.digest(lf), migrate.digest(crlf))
+        for stored in (hashlib.sha256(lf).hexdigest(), hashlib.sha256(crlf).hexdigest(), migrate.digest(lf)):
+            self.assertTrue(migrate.same_migration(stored, crlf))
+            self.assertTrue(migrate.same_migration(stored, lf))
+        self.assertFalse(migrate.same_migration(migrate.digest(lf), b"CREATE TABLE t (id bigint);\n"))
 
 
 @unittest.skipUnless(DSN, "нет GATEWAY_TEST_DATABASE_URL: тесты PostgreSQL пропущены")
@@ -73,6 +86,15 @@ class StudyRegistryTests(unittest.TestCase):
         self.assertEqual(first.referral_links(["ref-1"]), {"ref-1": {"episode_id": "ep-1", "step_id": "s1"}})
         first.clear_working()  # a clean start
         self.assertEqual(first.referral_links(), {})
+
+    def test_assistant_texts_keep_the_first_answer_and_clear_on_a_clean_start(self):
+        store = self.schema()
+        self.assertIsNone(store.assistant_text("job-1", "hash-1"))
+        self.assertEqual(store.save_assistant_text("job-1", "hash-1", "claude-sonnet-5-5", "Первый ответ"), "Первый ответ")
+        self.assertEqual(store.save_assistant_text("job-1", "hash-1", "claude-sonnet-5-5", "Второй ответ"), "Первый ответ")
+        self.assertIsNone(store.assistant_text("job-1", "hash-2"))
+        store.clear_working()
+        self.assertIsNone(store.assistant_text("job-1", "hash-1"))
 
     def test_schemas_are_isolated_and_clean_start_clears_the_registry(self):
         first, second = self.schema(), self.schema()

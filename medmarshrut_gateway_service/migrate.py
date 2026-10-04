@@ -13,6 +13,17 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = Path(__file__).with_name("migrations")
 
 
+def digest(source: bytes) -> str:
+    """Line endings do not count: git with core.autocrlf gives the same file as LF or CRLF."""
+    return hashlib.sha256(source.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def same_migration(stored: str, source: bytes) -> bool:
+    """Schemas applied before the fix keep the hash of the raw bytes, LF or CRLF."""
+    lf = source.replace(b"\r\n", b"\n")
+    return stored in {hashlib.sha256(lf).hexdigest(), hashlib.sha256(lf.replace(b"\n", b"\r\n")).hexdigest()}
+
+
 def local_env() -> dict[str, str]:
     result = dict(os.environ)
     path = ROOT / ".env"
@@ -66,9 +77,8 @@ def run(mode: str, env: dict[str, str]) -> None:
                         applied = dict(cur.fetchall())
             for file in sorted(MIGRATIONS.glob("[0-9]*.sql")):
                 source = file.read_bytes()
-                digest = hashlib.sha256(source).hexdigest()
                 if file.stem in applied:
-                    if applied[file.stem] != digest:
+                    if not same_migration(applied[file.stem], source):
                         raise StoreError(f"Миграция {file.name} изменена после применения.")
                     print(f"[ок] {file.name} уже применена")
                 elif mode == "check":
@@ -78,7 +88,7 @@ def run(mode: str, env: dict[str, str]) -> None:
                         with conn.cursor() as cur:
                             cur.execute(source.decode("utf-8"))
                             cur.execute("INSERT INTO schema_migrations (version, sha256) VALUES (%s, %s)",
-                                        (file.stem, digest))
+                                        (file.stem, digest(source)))
                     print(f"[ок] {file.name} применена")
     except StoreError:
         raise

@@ -50,7 +50,7 @@ SERVICES = [
                                     "CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"],
                                     "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "GATEWAY_HOME_CLINIC": "clinic-central",
                                     "GATEWAY_STATE_DIR": str(state), "GATEWAY_PEOPLE": str(DEMO / "people.demo.json"),
-                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode), **GATEWAY_DB_ENV},
+                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode), **GATEWAY_DB_ENV, **GATEWAY_ASSISTANT_ENV},
      "pages": []},
 ]
 APP_URL = f"http://{HOST}:8763"
@@ -59,8 +59,12 @@ STRIPPED_ENV = {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB", "PA
                 "DEMO_STUDY_INDEX", "PATH_MIS_TOKEN", "CLINIC_MIS_TOKEN", "IMAGE_URL", "PATH_URL", "CLINIC_URL",
                 "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT",
                 "GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA", "GATEWAY_SUPABASE_PROJECT_REF"}
+# The assistant's API key goes to the gateway only (task 11): never to the three services, seed or checks.
+ASSISTANT_ENV = ("ANTHROPIC_API_KEY", "GATEWAY_ASSISTANT_MODEL")
+STRIPPED_ENV |= {*ASSISTANT_ENV, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"}
 
 GATEWAY_DB_ENV: dict[str, str] = {}
+GATEWAY_ASSISTANT_ENV: dict[str, str] = {}
 
 
 def imaging_mode(mode: str) -> str:
@@ -275,6 +279,9 @@ def main() -> int:
                 "python -m pip install -r medmarshrut_image_service/requirements.txt")
             return 1
 
+    GATEWAY_ASSISTANT_ENV.clear()
+    if not checking:  # smoke and browser checks never call the real API
+        GATEWAY_ASSISTANT_ENV.update({name: os.environ[name] for name in ASSISTANT_ENV if os.environ.get(name)})
     values = make_secrets()
     stand = Stand(state, args.image, values)
     mode = "сценарный backend, демо" if args.image == "demo" else "настоящий сервис снимков"
@@ -307,6 +314,11 @@ def main() -> int:
             for page in service["pages"]:
                 say(f"  встроенная страница ({service['title']}): http://{HOST}:{service['port']}{page}")
         say()
+        if "ANTHROPIC_API_KEY" in GATEWAY_ASSISTANT_ENV:
+            say(f"ИИ-помощник включён, модель {GATEWAY_ASSISTANT_ENV.get('GATEWAY_ASSISTANT_MODEL', 'claude-sonnet-5-5')}. "
+                "Ключ передан только шлюзу.")
+        else:
+            say("ИИ-помощник выключен: чтобы включить, задайте $env:ANTHROPIC_API_KEY и перезапустите стенд.")
         say(f"Откройте приложение: {APP_URL}")
         say("Стенд работает. Остановить — Ctrl+C.")
         while True:

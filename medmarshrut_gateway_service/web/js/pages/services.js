@@ -16,7 +16,7 @@ export function services(){
   const node = (t, sub, n) => `<div class="node"><div class="nodehead">${n ? `<b class="num">${n}</b>` : ''}<span>${t}</span></div><small>${sub}</small></div>`;
   return `<div class="pagehead"><div><div class="eyebrow">Обзор продукта</div><h1>Карта сервисов</h1><p>ИИ-заключение по снимку превращается в следующий шаг пациента. Шесть сервисов закрывают путь от снимка до аптеки.</p></div></div>
     <div class="panel"><div class="flow">
-      <div class="flowcol"><div class="flowhead">Откуда приходят данные</div>${node('РИС и PACS клиники', 'Снимки DICOM и описания')}${node('ИИ-сервисы «Третье мнение»', 'Заключения ИИ по КТ, рентгену, маммографии')}${node('МИС клиники', 'Расписание, карта пациента, итоги визитов')}${node('Пациент', 'Снимок или заключение из другой клиники')}</div>
+      <div class="flowcol"><div class="flowhead">Откуда приходят данные</div>${node('РИС и PACS клиники', 'Снимки DICOM и описания')}${node('ИИ-сервисы «Третье мнение»', 'Заключения ИИ по КТ, рентгену, маммографии')}${node('ИИ-помощник (Claude)', 'Получает только текст: без ФИО, псевдонима, оценок модели и снимков. Врачу — формулировка, пациенту — пояснение после подтверждения. ' + assistantBadge())}${node('МИС клиники', 'Расписание, карта пациента, итоги визитов')}${node('Пациент', 'Снимок или заключение из другой клиники')}</div>
       <div class="arrow">→</div>
       <div class="flowcol core"><div class="flowhead">МедМаршрут</div>${node('Что на снимке?', 'Черновик ИИ, затем подтверждение врача', 1)}<div class="down">↓</div>${node('Путь пациента', 'Заключение, следующий шаг, эпизод сопровождения', 2)}<div class="down">↓</div><div class="pair">${node('Врач — клиника', 'Решения и запросы', 3)}${node('Клиника — пациент', 'Сообщения и ответы', 4)}</div><div class="pair">${node('Маркетплейс', 'Товары без рецепта', 5)}${node('Аптеки-партнёры', 'Бронь по рецепту', 6)}</div></div>
       <div class="arrow">→</div>
@@ -53,6 +53,12 @@ function serviceBadge(key){
 function cardState(i){
   const key = LIVE_CARDS[i];
   return `<p class="svcstate">${key ? 'Сервис: ' + serviceBadge(key) : badge('демо-модуль', 'gray')}</p>`;
+}
+/* Задание 11: помощник включён, только если у шлюза есть ключ API */
+function assistantBadge(){
+  if (health.status === 'loading') return loadingLine();
+  if (health.status !== 'ok') return badge('нет данных', 'gray');
+  return health.data.assistant ? badge('включён') : badge('выключен: нет ключа API', 'gray');
 }
 function clinicState(){
   if (health.status === 'error') return errorNote(health.message, 'healthRetry');

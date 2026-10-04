@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from assistant import DOCTOR_UNAVAILABLE, PATIENT_UNAVAILABLE, Assistant
 from catalog import STUDY_NAMES
 from errors import GatewayError
 from imaging import (MAX_ARCHIVE, MAX_CONCLUSION, MODALITY_TYPES, TASKS, build_manifest, confirm_body,
@@ -64,6 +65,8 @@ class Config:
     db_dsn: str = ""
     db_schema: str = ""
     conclusions_path: Path | None = None
+    assistant_key: str = field(default="", repr=False)  # ANTHROPIC_API_KEY: only in this process
+    assistant_model: str = ""
 
 
 def load_config(env: dict[str, str]) -> Config:
@@ -103,7 +106,8 @@ def load_config(env: dict[str, str]) -> Config:
                   values["CLINIC_SHARED_SECRET"], clinic_tokens, home, Path(env["GATEWAY_STATE_DIR"]),
                   Path(env.get("GATEWAY_PEOPLE") or REPO / "demo_stand" / "people.demo.json"), mode, urls, port,
                   env.get("GATEWAY_DATABASE_URL", ""), env.get("GATEWAY_DB_SCHEMA", ""),
-                  Path(env.get("GATEWAY_CONCLUSIONS") or REPO / "demo_stand" / "conclusions.demo.json"))
+                  Path(env.get("GATEWAY_CONCLUSIONS") or REPO / "demo_stand" / "conclusions.demo.json"),
+                  env.get("ANTHROPIC_API_KEY", ""), env.get("GATEWAY_ASSISTANT_MODEL", ""))
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,7 @@ class Gateway:
         self.upstream = Upstream(config.urls, reviewer_token=config.reviewer_token,
                                  path_admin_token=config.path_admin_token, path_mis_token=config.path_mis_token,
                                  clinic_secret=config.clinic_secret, clinic_tokens=config.clinic_tokens, **kwargs)
+        self.assistant = Assistant.from_key(config.assistant_key, config.assistant_model)
         # Route -> handler. A route works only with a row in `access` (or in `public`): default is deny.
         self.routes: dict[tuple[str, str], Handler] = {
             ("GET", "/api/health"): self.health,
@@ -192,6 +197,9 @@ class Gateway:
             ("GET", "/api/partner/patients/{id}/card"): self.partner_card,
             ("POST", "/api/partner/referrals/{id}/{action}"): self.partner_action,
             ("GET", "/api/patient/documents"): self.patient_documents,
+            ("GET", "/api/assistant/status"): self.assistant_status,
+            ("POST", "/api/doctor/studies/{id}/assistant/rewrite"): self.doctor_rewrite,
+            ("POST", "/api/patient/studies/{id}/assistant/explain"): self.patient_explain,
         }
         # Routes whose body is a ZIP archive, not JSON: type and Content-Length are checked before reading.
         self.raw_routes: set[tuple[str, str]] = {("POST", "/api/patient/studies"), ("POST", "/api/staff/studies")}
@@ -242,6 +250,9 @@ class Gateway:
             ("GET", "/api/partner/patients/{id}/card"): {"partner"},
             ("POST", "/api/partner/referrals/{id}/{action}"): {"partner"},
             ("GET", "/api/patient/documents"): {"patient"},
+            ("GET", "/api/assistant/status"): set(ROLES),
+            ("POST", "/api/doctor/studies/{id}/assistant/rewrite"): {"doctor"},
+            ("POST", "/api/patient/studies/{id}/assistant/explain"): {"patient"},
         }
 
     def allowed_hosts(self) -> set[str]:
@@ -270,7 +281,8 @@ class Gateway:
 
     def health(self, ctx: Context) -> tuple[int, dict]:
         return 200, {"gateway": "ok", "auth": "demo-roles", "imaging_mode": self.config.imaging_mode,
-                     "services": self.upstream.health_all(), "partner_clinics": self._partner_clinics()}
+                     "services": self.upstream.health_all(), "partner_clinics": self._partner_clinics(),
+                     "assistant": self.assistant.enabled}
 
     def _partner_clinics(self) -> list[dict]:
         """Partner clinics a window can open: a staff token, a demo person, a name from the clinic network."""
@@ -897,6 +909,56 @@ class Gateway:
         episodes = self._episodes_by_report() if body.get("routing_status") == "sent" else {}
         item = self._doctor_item(row, body, self._patient_names(), episodes)
         return 200, {"study": item, "next": item.get("next")}
+
+    # ---------- ИИ-помощник (задание 11): текст для врача и пациента, ничего не решает ----------
+
+    def assistant_status(self, ctx: Context) -> tuple[int, dict]:
+        return 200, {"enabled": self.assistant.enabled}
+
+    def doctor_rewrite(self, ctx: Context) -> tuple[int, dict]:
+        """A wording suggestion. Nothing is stored and nothing goes to the image service: the physician confirms as usual.
+        To the API: study title, finding description and place, the physician's text. No score, UID, name or patient_ref."""
+        if not self.assistant.enabled:
+            raise GatewayError(503, "assistant_unavailable", DOCTOR_UNAVAILABLE)
+        row = self._registry_row(ctx.params["id"])
+        job = self._review(row["job_id"])
+        if job is None or job.get("status") != "awaiting_physician":
+            raise GatewayError(409, "study_unavailable", "Исследование уже подтверждено или не ждёт проверки врача. Обновите страницу.")
+        draft = text(ctx.body.get("text"), "text", MAX_CONCLUSION)
+        finding = next((f for f in (job.get("result") or {}).get("findings") or []
+                        if f.get("code") == ctx.body.get("finding_code")), None)
+        if finding is None:
+            raise GatewayError(400, "invalid_input", "Выберите признак, который вы подтверждаете.")
+        payload = {"study": self._title(row, job), "finding": finding.get("description"),
+                   "place": place(finding, job.get("study")), "draft": draft}
+        return 200, {"suggestion": self.assistant.rewrite_conclusion(row["job_id"], payload, MAX_CONCLUSION)}
+
+    def patient_explain(self, ctx: Context) -> tuple[int, dict]:
+        """Only the patient's own study and only after confirmation; before it the API is not called at all.
+        To the API: study title, the physician's conclusion, the approved explanation, the plan step. Cached by input."""
+        if not self.assistant.enabled:
+            raise GatewayError(503, "assistant_unavailable", PATIENT_UNAVAILABLE)
+        row = self._registry_row(ctx.params["id"], owner=ctx.session)
+        public = self._public(row["job_id"])
+        if public is None or public.get("status") != "confirmed":
+            raise GatewayError(409, "not_confirmed", "Объяснение появится после того, как врач подтвердит заключение.")
+        job = self._review(row["job_id"])
+        if job is None:
+            raise GatewayError(409, "study_unavailable", UNAVAILABLE + ". Загрузите исследование заново.")
+        confirmation = job.get("confirmation") or {}
+        code = (confirmation.get("routing_payload") or {}).get("finding_code")
+        store = self.data_store()
+        raw = self._episodes_by_report().get(row["job_id"])
+        step = self._first_unfinished(raw) if raw and raw.get("status") == "active" else None
+        payload = {"study": self._title(row, job), "conclusion": confirmation.get("conclusion"),
+                   "approved": (store.explanation(self.config.home_clinic, code) if code else None) or DEFAULT_EXPLANATION,
+                   "next_step": step.get("description") if step else None}
+        key = self.assistant.digest(payload)
+        saved = store.assistant_text(row["job_id"], key)
+        if saved is None:
+            saved = store.save_assistant_text(row["job_id"], key, self.assistant.model,
+                                              self.assistant.explain_for_patient(row["job_id"], payload))
+        return 200, {"explanation": saved}
 
     def staff_manual_studies(self, ctx: Context) -> tuple[int, dict]:
         """For the coordinator: who waits for a manual reading, and which confirmations never reached the path service.
