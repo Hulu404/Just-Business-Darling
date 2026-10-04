@@ -16,6 +16,9 @@ from upstream import Upstream, human_error, signature
 
 REPO = Path(__file__).resolve().parents[1]
 
+# Текстовые проверки веб-файлов — только для исходников. Картинки и шрифт читаются как байты.
+TEXT_SUFFIXES = {".html", ".css", ".js", ".svg"}
+
 
 def load_path_auth():
     """The path service's auth.py under another module name: the reference implementation of the signature."""
@@ -301,7 +304,7 @@ class StaticTests(GatewayTestCase):
 
     def test_web_has_no_storage_external_urls_or_inline_handlers(self):
         for path in WEB_DIR.rglob("*"):
-            if not path.is_file():
+            if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
                 continue
             content = path.read_text(encoding="utf-8")
             self.assertNotRegex(content, r"localStorage|sessionStorage", path.name)
@@ -334,9 +337,9 @@ class SecretTests(GatewayTestCase):
                 self.assertNotIn(value.encode(), payload)
         for path in WEB_DIR.rglob("*"):
             if path.is_file():
-                content = path.read_text(encoding="utf-8")
+                content = path.read_bytes()
                 for value in values:
-                    self.assertNotIn(value, content)
+                    self.assertNotIn(value.encode(), content)
 
 
 class UpstreamFailureTests(GatewayTestCase):

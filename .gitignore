@@ -7,3 +7,8 @@ medmarshrut_path_service/*.sqlite3-*
 .env
 .venv/
 .pip-tmp/
+
+# Образец rescan и производные от него (коммерческий шрифт вшит в образец)
+prototype/rescan-app-standalone.html
+prototype/rescan-app-text.html
+medmarshrut_gateway_service/web/fonts/

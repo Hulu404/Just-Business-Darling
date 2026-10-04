@@ -1,0 +1,31 @@
+# 12. Кабинет врача rescan на данных шлюза
+
+Задание выполняется циклами по `prompts/rescan-loop.md`. Память цикла — «Ход работ» ниже.
+
+## Ход работ
+
+- [x] **Цикл 0. Разведка и опора** — 2026-10-04 22:20
+  - Создан отчёт с «Ходом работ». Образец на месте (`prototype/rescan-app-standalone.html`, untracked).
+  - Установлены недостающие зависимости окружения: `pydicom`, `numpy`, `Pillow`, `onnxruntime`, `anthropic`, `playwright` + chromium (без них исходные наборы падали на импорте, код ни при чём).
+  - Полная проверка до правок кода: быстрая — image 20, path 12, clinic 8, medications 10, gateway 87 OK (skipped=6, тесты PostgreSQL без `GATEWAY_TEST_DATABASE_URL`); smoke 22/22; web-check 7/7 (сравнение с прототипом 8 экранов, макс. расхождение 0.060%).
+  - Написан `prototype/rescan_extract.py`: шрифт → `web/fonts/Stolzl-Regular.otf` (OTTO, 57948 Б), `IMG` (20 форм) и `ORG` (5 органов: lungs, heart, adrenal, brain, knee) → `web/img/rescan/*.webp` (RIFF), текст без base64 → `prototype/rescan-app-text.html` (149 КБ). Портреты `AVS` не извлекаются. Скрипт идемпотентен: повторный запуск — те же хеши.
+  - `.gitignore`: добавлены `prototype/rescan-app-standalone.html`, `prototype/rescan-app-text.html`, `medmarshrut_gateway_service/web/fonts/`.
+  - Правка `test_gateway.py`: текстовые проверки (`localStorage`/URL/`on…=`) теперь только для `.html/.css/.js/.svg` (новая константа `TEXT_SUFFIXES`); поиск секретов — по байтам всех файлов. После правки gateway 87 OK (skipped=6) с .webp и .otf в `web/`.
+  - Проверено: исходные проверки зелёные (числа выше); после скрипта и правки тестов быстрая зелёная; повторный запуск скрипта файлы не меняет. Отступлений от задания нет.
+  - В коммит: `prompts/{12,13,14,15}-*.md`, `prompts/rescan-loop.md`, `prompts/rescan-README.md`, `prototype/rescan_extract.py`, `.gitignore`, `web/img/rescan/*.webp`, `test_gateway.py`, отчёт. Чужое (`prompts/09`, `PROGRESS_*`, `debug.log`, презентация) не трогалось.
+- [ ] Цикл 1. Шлюз: статика и защита
+- [ ] Цикл 2. Шлюз: предпросмотр шага
+- [ ] Цикл 3. Шлюз: место и специалист записи
+- [ ] Цикл 4. Каркас кабинета
+- [ ] Цикл 5. «Исследования»
+- [ ] Цикл 6. «Приёмы»
+- [ ] Цикл 7. «Пациенты»
+- [ ] Цикл 8. «Сегодня», колокольчик, «Настройки»
+- [ ] Цикл 9. Переключение
+- [ ] Цикл 10. Ревизия
+- [ ] Финал
+
+## Примечания окружения
+
+- Зависимости ставятся в `.venv` из `requirements.txt` сервисов. Браузер для web-check: `python -m playwright install chromium`.
+- Тесты PostgreSQL (6 шт. в gateway) идут только с `GATEWAY_TEST_DATABASE_URL`; без неё пропускаются.
