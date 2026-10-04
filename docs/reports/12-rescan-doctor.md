@@ -23,7 +23,11 @@
   - Helper `_study_preview(job)` в `service.py`. Строка в README шлюза.
   - Тесты (`test_imaging.StudyRouteTests`, +4): шаг по утверждённому правилу (и проверка тела запроса без `confidence`); причина при неутверждённом; `preview: null` при `path.mode="drop"`; 403 пациенту и координатору.
   - Проверка (быстрая): image 20, path 12, clinic 8, medications 10, gateway 94 OK (было 90, +4; skipped=6). Отступлений нет.
-- [ ] Цикл 3. Шлюз: место и специалист записи
+- [x] **Цикл 3. Шлюз: место и специалист записи** — 2026-10-04 22:48
+  - `store.appointment_detail(episode_id, step_id)`: специалист (из `slots`), место и формат (из `appointments`) по подтверждённой/предложенной записи; у партнёра записи в этих таблицах нет — `None`.
+  - `GET /api/doctor/visits` у каждого визита отдаёт `appointment` из этого метода. Строка в README шлюза (раньше `/api/doctor/visits` там не было).
+  - Тесты (`test_path_gateway`, +2, через `FakeStore.appointment_detail`): визит несёт специалиста/место/формат; `appointment: null` без записи в клинике.
+  - Проверка (быстрая): image 20, path 12, clinic 8, medications 10, gateway 96 OK (было 94, +2; skipped=6). Отступлений нет.
 - [ ] Цикл 4. Каркас кабинета
 - [ ] Цикл 5. «Исследования»
 - [ ] Цикл 6. «Приёмы»

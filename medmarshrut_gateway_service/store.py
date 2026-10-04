@@ -272,6 +272,16 @@ class GatewayStore:
         with self.transaction() as cur:
             cur.execute("UPDATE appointments SET status=%s, updated_at=now() WHERE id=%s", (status, appointment_id))
 
+    def appointment_detail(self, episode_id: str, step_id: str) -> dict | None:
+        """Специалист, место и формат записи шага. У партнёра записи в этих таблицах нет — тогда None."""
+        with self.transaction(read_only=True) as cur:
+            cur.execute("""SELECT sl.specialist, a.place, a.format FROM appointments a
+                           JOIN slots sl ON sl.id=a.slot_id
+                           WHERE a.episode_id=%s AND a.step_id=%s AND a.status IN ('offered','confirmed')
+                           ORDER BY a.updated_at DESC LIMIT 1""", (episode_id, step_id))
+            row = cur.fetchone()
+        return {"specialist": row[0], "place": row[1], "format": row[2]} if row else None
+
     def appointment_for_step(self, episode_id: str, step_id: str) -> dict | None:
         with self.transaction(read_only=True) as cur:
             cur.execute("""SELECT id, starts_at, status FROM appointments

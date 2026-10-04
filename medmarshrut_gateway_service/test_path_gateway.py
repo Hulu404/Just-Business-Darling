@@ -23,6 +23,10 @@ def episode(eid: str, ref: str) -> dict:
 class FakeStore:
     def __init__(self):
         self.appointment_updates = []
+        self.appointments = {"step-1": {"specialist": "Терапевт", "place": "Каб. 214", "format": "Очно"}}
+
+    def appointment_detail(self, episode_id, step_id):
+        return self.appointments.get(step_id)
 
     def explanation(self, *_):
         return {"seen": "Врач подтвердил находку", "means": "Обсудите её на приёме"}
@@ -152,6 +156,20 @@ class PathGatewayTests(GatewayTestCase):
         self.assertEqual(outcome["physician_id"], "doctor-demo")
         self.assertEqual(outcome["confirmed_at"], "2026-01-02T12:00:00+00:00")
         self.assertNotIn("attacker", json.dumps(outcome))
+
+    def test_doctor_visits_carry_appointment_place_and_specialist(self):
+        self.login("doctor")
+        status, _, body = self.call("GET", "/api/doctor/visits", role="doctor")
+        self.assertEqual(status, 200, body)
+        visit = next(v for v in body["visits"] if v["episode"]["id"] == "own-1")
+        self.assertEqual(visit["appointment"], {"specialist": "Терапевт", "place": "Каб. 214", "format": "Очно"})
+
+    def test_doctor_visits_appointment_is_null_without_clinic_booking(self):
+        self.gateway.store.appointments = {}  # запись у партнёра в таблицы шлюза не попадает
+        self.login("doctor")
+        _, _, body = self.call("GET", "/api/doctor/visits", role="doctor")
+        visit = next(v for v in body["visits"] if v["episode"]["id"] == "own-1")
+        self.assertIsNone(visit["appointment"])
 
     def test_rules_dry_run_requires_staff_or_doctor(self):
         self.path.routes[("POST", "/v1/rules/dry-run")] = (200, {"dry_run": True, "steps": [],

@@ -573,13 +573,15 @@ class Gateway:
 
     def doctor_visits(self, ctx: Context) -> tuple[int, dict]:
         names = self._patient_names()
+        store = self.data_store()
         visits = []
         for raw in self._episodes():
             for step in raw.get("plan_steps", []):
                 if step.get("status") in {"confirmed", "attended"}:
                     visits.append({"episode": staff_episode(raw, names.get(
                         (raw.get("source_report") or {}).get("patient_ref"), "Пациент не указан")),
-                                   "step_id": step["id"]})
+                                   "step_id": step["id"],
+                                   "appointment": store.appointment_detail(raw["id"], step["id"])})
         return 200, {"visits": visits}
 
     def doctor_manual_plan(self, ctx: Context) -> tuple[int, dict]:
