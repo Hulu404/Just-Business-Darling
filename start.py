@@ -50,14 +50,17 @@ SERVICES = [
                                     "CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"],
                                     "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "GATEWAY_HOME_CLINIC": "clinic-central",
                                     "GATEWAY_STATE_DIR": str(state), "GATEWAY_PEOPLE": str(DEMO / "people.demo.json"),
-                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode)},
+                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode), **GATEWAY_DB_ENV},
      "pages": []},
 ]
 APP_URL = f"http://{HOST}:8763"
 # Inherited variables that would silently change what the stand runs.
 STRIPPED_ENV = {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB", "PATH_RULES", "CLINIC_NETWORK",
                 "DEMO_STUDY_INDEX", "PATH_MIS_TOKEN", "CLINIC_MIS_TOKEN", "IMAGE_URL", "PATH_URL", "CLINIC_URL",
-                "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT"}
+                "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT",
+                "GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA", "GATEWAY_SUPABASE_PROJECT_REF"}
+
+GATEWAY_DB_ENV: dict[str, str] = {}
 
 
 def imaging_mode(mode: str) -> str:
@@ -83,6 +86,38 @@ def base_env(image_mode: str) -> dict[str, str]:
         env.pop("MODEL_CONFIG", None)
     env.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
     return env
+
+
+def gateway_db_env(checking: str = "") -> dict[str, str]:
+    """Read only the server DB settings; never pass them to the three core services."""
+    values = {key: os.environ[key] for key in ("GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA",
+              "GATEWAY_SUPABASE_PROJECT_REF") if key in os.environ}
+    path = ROOT / ".env"
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() in {"GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA", "GATEWAY_SUPABASE_PROJECT_REF"}:
+                values.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    if checking:
+        schema = values.get("GATEWAY_DB_SCHEMA", "")
+        values["GATEWAY_DB_SCHEMA"] = schema + ("_smoke" if checking == "smoke" else "_webcheck")
+    return values
+
+
+def prepare_gateway_db(image_mode: str, *, keep: bool, checking: str = "") -> bool:
+    GATEWAY_DB_ENV.clear()
+    GATEWAY_DB_ENV.update(gateway_db_env(checking))
+    command_env = {**base_env(image_mode), **GATEWAY_DB_ENV, "GATEWAY_HOME_CLINIC": "clinic-central"}
+    for script, arguments in (("migrate.py", ["apply"]), ("db_setup.py", ["--keep"] if keep else [])):
+        result = subprocess.run([sys.executable, "-B", str(ROOT / "medmarshrut_gateway_service" / script), *arguments],
+                                cwd=ROOT, env=command_env)
+        if result.returncode:
+            say("База шлюза не готова. Папка состояния стенда не очищена.")
+            return False
+    return True
 
 
 def port_busy(port: int) -> bool:
@@ -227,6 +262,9 @@ def main() -> int:
         return 1
 
     state = args.state_dir.resolve()
+    if not prepare_gateway_db(args.image, keep=args.keep,
+                              checking="smoke" if args.smoke else "web_check" if args.web_check else ""):
+        return 1
     prepare_state(state, args.keep)
     kit_index = state / "kit" / "index.json"
     if not kit_index.exists():

@@ -71,8 +71,8 @@ export function patientStudy(st){
     return `<div class="panel">${head(st.status === 'processing' ? 'Обрабатывается' : 'Ждёт врача', 'blue')}<div class="steps" style="margin:18px 0 14px">${names.map((n, i) => `${i ? '<span class="sep"></span>' : ''}<span class="step ${i <= stage ? 'on' : ''}"><b>${i + 1}</b>${n}</span>`).join('')}</div><p style="margin:0">${st.status === 'processing' ? 'Проверяем файлы и готовим черновик заключения.' : 'Черновик готов, его проверяет врач-рентгенолог. Результат и план появятся здесь, а мы пришлём сообщение. Обычно это занимает до двух часов.'}</p></div>`;
   }
   if (st.status === 'manual') return `<div class="panel">${head('Врач описывает сам', 'orange')}<p style="margin:0">Врач решил описать этот снимок без черновика ИИ. Заключение появится здесь, и мы пришлём сообщение.</p></div>`;
-  const e = st.episodeId ? ep(st.episodeId) : null;
-  const nx = st.noRoute ? {head:'Сейчас ничего делать не нужно', text:'Напомним о плановом обследовании через 12 месяцев.', buttons:''} : e ? patientNext(e) : {head:'', text:'', buttons:''};
+  // Задание 05 подключит исследования к сервису; демо-исследование не ведёт к настоящему эпизоду.
+  const nx = {head:'Демо-исследование', text:'Маршрут по этому снимку пока недоступен на стенде.', buttons:''};
   return `<div class="panel">${head('Подтверждено врачом')}
     <div class="explain">
       <div class="viewer">${SCHEME[d.scheme](d.findings.length > 0)}<div class="cap"><span>${d.findings.length ? 'Схема: где врач отметил изменение' : 'Схема снимка'}</span><span>Не медицинское изображение</span></div></div>
@@ -97,7 +97,7 @@ export function uploadModal(){
     <div class="field"><label for="upKind">Что за исследование</label><select id="upKind"><option value="xray">Рентгенография</option><option value="ct">КТ</option><option value="mg">Маммография</option><option value="mri">МРТ</option></select></div>
     <div class="field" style="margin-top:14px"><label for="upFile">Файл</label><input id="upFile" type="file" accept=".zip,.dcm,.pdf,image/*"><small>Архив DICOM, PDF или фото заключения. В демо файл никуда не отправляется: сохраняется только его имя.</small></div>
     <label class="checkline" style="margin-top:14px"><input type="checkbox" id="upConsent"><span>Разрешаю передать исследование врачу клиники «Линия здоровья» для описания</span></label>
-    <div class="actions">${btn('Отправить врачу', 'upload')}${btn('Отмена', 'close', 'secondary')}</div>`);
+    <div class="actions"><button class="btn" disabled>Отправить врачу</button><span class="muted">Пока недоступно на стенде</span>${btn('Отмена', 'close', 'secondary')}</div>`);
 }
 
 /* ---------- Мой план ---------- */
@@ -299,7 +299,7 @@ export function review(){
         <div class="actions">${navBtn('Исправить ответы', 'intake', 'secondary')}</div></div>
       <div class="stack"><div class="panel"><h3>Что извлечено из документа?</h3><p>Для анализов и выписок распознавание в прототипе не подключено. Если нужно, вручную добавьте важные сведения для врача.</p><div class="field"><label for="documentNotes">Заметки по документу</label><textarea id="documentNotes" placeholder="Например, дата исследования и показатели, которые хотите обсудить">${safe(state.documentNotes)}</textarea></div></div>
         <div class="note">Не отправляйте реальные медицинские документы при тестировании прототипа. Сведения остаются в этой вкладке до обновления страницы.</div></div></div>
-    <div class="actions">${btn('Составить маршрут →', 'createRoute')}</div>`;
+    <div class="actions"><button class="btn" disabled>Составить маршрут →</button><span class="muted">Пока недоступно на стенде</span></div>`;
 }
 export function routeByChannel(){
   const c = {private:['Платный приём', 'Выберите специалиста, филиал и доступное время в расписании клиники.'], dms:['Приём по ДМС', 'Проверьте, входит ли услуга в вашу программу и нужно ли согласование со страховой.'], oms:['Маршрут по ОМС', 'Уточните порядок обращения через поликлинику и необходимость направления.']}[state.channel];
@@ -331,4 +331,3 @@ export function createOwnEpisode(){
   else { mkStep(e, state.scenario === 'after' ? 'attending' : 'gp', 1, 'Демо-маршрут из анкеты', ''); addLog(e, 'Маршрутизатор', 'Предложен демонстрационный маршрут: ' + lc(title(e.steps[0]))); }
   state.episodes.unshift(e);
 }
-

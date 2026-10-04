@@ -19,7 +19,7 @@ export function reading(){
     ${wait.length ? `<div class="grid two">${wait.map(st => `<div class="card">${studyBadge(st)}<h3 style="margin-top:13px">${safe(st.patient)}</h3><p>${DEMO[st.kind].title} · ${lc(safe(st.date))}<br>${safe(aiSummary(st))}</p><div class="actions">${btn('Открыть снимок', 'studyOpen', 'small', {id:st.id})}</div></div>`).join('')}</div>` : '<div class="panel empty"><h3>Всё проверено</h3><p>Новые исследования появятся здесь, когда придут из РИС или от пациента.</p></div>'}
     <div class="sectionhead"><h2>Подтверждённые</h2></div>
     <div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Исследование</th><th>Находка</th><th>Что дальше</th><th></th></tr></thead><tbody>
-      ${done.map(st => { const e = st.episodeId && ep(st.episodeId); return `<tr><td><strong>${safe(st.patient)}</strong></td><td>${DEMO[st.kind].title}<small>${safe(st.date)}</small></td><td>${DEMO[st.kind].findings[0] ? DEMO[st.kind].findings[0].label : 'Изменений не выявлено'}${st.edited ? '<small>черновик исправлен</small>' : ''}</td><td>${e ? safe(nextStepLabel(e)) : 'Маршрут не нужен'}</td><td>${btn('Открыть', 'studyOpen', 'secondary small', {id:st.id})}</td></tr>`; }).join('')}
+      ${done.map(st => `<tr><td><strong>${safe(st.patient)}</strong></td><td>${DEMO[st.kind].title}<small>${safe(st.date)}</small></td><td>${DEMO[st.kind].findings[0] ? DEMO[st.kind].findings[0].label : 'Изменений не выявлено'}${st.edited ? '<small>черновик исправлен</small>' : ''}</td><td>Пока недоступно на стенде</td><td>${btn('Открыть', 'studyOpen', 'secondary small', {id:st.id})}</td></tr>`).join('')}
     </tbody></table></div>`;
 }
 
@@ -27,7 +27,7 @@ export function study(){
   const st = state.studies.find(x => x.id === state.sel.study) || state.studies[0];
   const d = DEMO[st.kind], f = d.findings[0];
   const canEdit = state.role === 'doctor' && st.status === 'awaiting';
-  const e = st.episodeId && ep(st.episodeId);
+  const e = null; // Демо-исследование не ссылается на настоящий эпизод до задания 05.
   const back = state.role === 'doctor' ? navBtn('← К списку', 'reading', 'secondary') : state.role === 'staff' ? (e ? `<button class="btn secondary" data-case="${safe(e.id)}">← К обращению</button>` : navBtn('← К обращениям', 'inbox', 'secondary')) : navBtn('← Назад', 'imaging', 'secondary');
   const under = d.scheme === 'ct' && f
     ? `<input type="range" id="slice" min="130" max="154" value="142" aria-label="Номер среза"><div class="cap"><span id="sliceLabel">Срез 142 из 310</span><span>Находка на срезах 139–145</span></div><div class="cap"><span>${d.files}</span><span>Схема, не медицинское изображение</span></div>`
@@ -40,7 +40,7 @@ export function study(){
           ${d.findings.length ? d.findings.map(x => `<div class="finding"><span class="dot now"></span><span><strong>${safe(x.label)}</strong><small>${safe(x.place)}</small><small>Оценка модели: ${safe(x.conf)}</small></span></div>`).join('') : '<p>Находок выше порога нет. Такое исследование всё равно смотрит врач.</p>'}
           <dl class="kv" style="margin-top:14px"><dt>Черновик готовил</dt><dd>${st.uploaded ? 'ИИ-модель сервиса, снимок загрузил пациент' : 'ИИ-сервис «Третье мнение», демо-интеграция'}</dd><dt>Файлы</dt><dd>${d.files}${st.file ? ' · ' + safe(st.file) : ''}</dd><dt>Проверка DICOM</dt><dd>Серия полная, протокол подходит модели</dd></dl></div>
         <div class="panel"><h3>${canEdit ? 'Черновик заключения' : 'Заключение'}</h3>
-          ${canEdit ? `<div class="field"><textarea id="draft" style="min-height:190px" aria-label="Текст заключения">${safe(d.draft)}</textarea><small>Каждая фраза черновика построена из находки ИИ. Правьте текст как обычно: дальше пойдёт только то, что вы подтвердите.</small></div><div class="actions">${btn('Подтвердить заключение', 'studyConfirm', '', {id:st.id})}${btn('Описать без ИИ', 'studyManual', 'secondary', {id:st.id})}</div>`
+          ${canEdit ? `<div class="field"><textarea id="draft" style="min-height:190px" aria-label="Текст заключения" disabled>${safe(d.draft)}</textarea><small>Демо-черновик. Подтверждение подключится в задании 05.</small></div><div class="actions"><button class="btn" disabled>Подтвердить заключение</button><span class="muted">Пока недоступно на стенде</span></div>`
             : st.status === 'confirmed' ? `<div class="quote">${highlight(text)}</div><p style="margin:12px 0 0">${safe(st.confirmedBy)}, подтверждено ${safe(st.confirmedAt)}${st.edited ? ' · черновик ИИ исправлен' : ''}</p>${e && state.role !== 'patient' ? `<div class="actions"><button class="btn secondary small" data-case="${safe(e.id)}">Открыть обращение</button></div>` : st.noRoute ? '<p style="margin:10px 0 0">Маршрут не нужен: пациент получил результат и напоминание через 12 месяцев.</p>' : ''}`
             : `<p style="margin:0">${st.status === 'manual' ? 'Врач описывает исследование без черновика ИИ.' : 'Заключение появится после проверки врачом.'}</p>`}
         </div></div></div>`;
@@ -72,4 +72,3 @@ export function planModal(id, stepId){
     <div class="note" style="margin-top:14px">Новые шаги появляются только после решения врача. Маршрутизатор сам план не меняет.</div>
     <div class="actions">${btn('Сохранить', 'planSave', '', {id, step:stepId || ''})}${btn('Отмена', 'close', 'secondary')}</div>`, true);
 }
-

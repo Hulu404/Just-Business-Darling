@@ -83,6 +83,8 @@ API сотрудника с `PATH_ADMIN_TOKEN`:
 - `POST /v1/episodes/{id}/revise-plan`: `physician_id`, `reason`, `steps`.
 - `POST /v1/episodes/{id}/stop`: `actor`, `reason`; закрывает эпизод, в том числе после отказа или потери связи, сохраняя незавершённые шаги в истории.
 - `GET /v1/staff/queue`: случаи ручного разбора, остановки, просрочки и ожидания итога; `GET /v1/staff/metrics`: показатели; `GET /v1/staff/outbox`: локальные исходящие события. Отправки пациентам нет.
+- `GET /v1/rules`: загруженные правила и версию, включая неутверждённые; нужен `PATH_ADMIN_TOKEN`.
+- `POST /v1/rules/dry-run`: проверить сочетание `study_type`, `anatomy`, `protocol_name`, `finding_code` без создания эпизода; нужен `PATH_ADMIN_TOKEN`.
 
 Итог МИС отправляется с `PATH_MIS_TOKEN`, итог формы сотрудника — с `PATH_ADMIN_TOKEN`, на `POST /v1/episodes/{id}/outcomes`. Тело: `{"step_id":"...","outcome":{"source":"mis|staff_form","event_id":"...","physician_id":"...","confirmed_at":"2026-10-04T11:00:00+00:00","summary":"...","next_steps":[{"kind":"appointment","description":"...","owner":"coordinator-1","due_at":"2026-10-10T12:00:00+00:00","continue_on":"confirmed_outcome"}]}}`. Пустой `next_steps` означает завершение плана; эпизод затем закрывает сотрудник. Ключ `(source,event_id)` идемпотентен, а повтор с другим содержимым отклоняется. Интеграция МИС должна передавать факт визита отдельно через `attend` и итог только после подтверждения врачом. Сервис доверяет роли интеграции; проверка подлинности врача должна быть в МИС или форме.
 

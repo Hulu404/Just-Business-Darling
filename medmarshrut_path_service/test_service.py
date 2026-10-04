@@ -187,5 +187,35 @@ class PathServiceTests(unittest.TestCase):
             self.assertEqual(json.load(response)["status"], "completed")
 
 
+    def test_rules_read_and_dry_run_are_admin_only_and_do_not_write(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.store, SECRET, ADMIN))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        with self.assertRaises(HTTPError) as failure:
+            urlopen(url + "/v1/rules")
+        self.assertEqual(failure.exception.code, 403)
+        headers = {"Authorization": "Bearer " + ADMIN}
+        with urlopen(Request(url + "/v1/rules", headers=headers)) as response:
+            rules = json.load(response)
+        self.assertEqual(rules["version"], "clinic-test-v1")
+        self.assertEqual(len(rules["rules"]), 1)
+        payload = {"study_type": "mr", "anatomy": "BRAIN", "protocol_name": "MR_BRAIN",
+                   "finding_code": "SYNTHETIC"}
+        with self.assertRaises(HTTPError) as failure:
+            urlopen(Request(url + "/v1/rules/dry-run", data=json.dumps(payload).encode(),
+                            headers={"Content-Type": "application/json"}, method="POST"))
+        self.assertEqual(failure.exception.code, 403)
+        with urlopen(Request(url + "/v1/rules/dry-run", data=json.dumps(payload).encode(),
+                             headers={**headers, "Content-Type": "application/json"}, method="POST")) as response:
+            dry = json.load(response)
+        self.assertEqual(dry["steps"], rules["rules"][0]["steps"])
+        self.assertIsNone(dry["manual_reason"])
+        self.assertTrue(dry["dry_run"])
+        self.assertEqual(self.store.list_ids(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

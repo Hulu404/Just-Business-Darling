@@ -99,6 +99,8 @@ X-Path-Signature: sha256=<hex HMAC-SHA256(секрет, timestamp + "." + сыр
 | `POST /v1/episodes/{id}/outcomes` | админ для `staff_form`, `PATH_MIS_TOKEN` для `mis` | `{"step_id", "outcome": {...}}` | `{"episode": {...}, "duplicate": bool}` |
 | `GET /v1/staff/queue` | админ | — | `{"cases": [...]}` |
 | `GET /v1/staff/metrics` | админ | — | показатели |
+| `GET /v1/rules` | админ | — | `{"version", "supported_protocols", "rules"}` из загруженного файла |
+| `POST /v1/rules/dry-run` | админ | `{"study_type", "anatomy", "protocol_name", "finding_code"}` | `{"dry_run": true, "steps": [...], "manual_reason", "rule_version"}`; ничего не записывает |
 | `GET /v1/staff/outbox` | админ | — | `{"events": [...]}` |
 | `GET /v1/patient/{patient_ref}` | токен пациента | — | `{"episodes": [...]}` |
 | `GET /patient`, `GET /staff` | — | — | встроенные HTML-страницы, токен вводится на странице |

@@ -51,7 +51,7 @@ export const ACTIONS = {
   how(){
     openModal(`${modalHead('', 'Как работает МедМаршрут')}<ol><li>Вы проходите исследование или рассказываете о ситуации. Снимок из другой клиники можно загрузить.</li><li>ИИ готовит черновик заключения, врач его подтверждает. Мы объясняем результат простыми словами.</li><li>Вы видите следующий шаг и записываетесь в клинике или у партнёра.</li><li>После приёма врач обновляет план. Рецепт и аптека — там же.</li></ol><p>Для сотрудников клиники есть очередь обращений, связь с врачом и пациентом, контроль качества.</p><div class="actions">${btn('Начать', 'new')}${navBtn('Карта сервисов', 'services', 'secondary')}</div>`);
   },
-  createRoute(){ state.documentNotes = $('#documentNotes') ? $('#documentNotes').value : ''; state.routeCreated = true; createOwnEpisode(); go('result'); },
+  createRoute(){ toast('Пока недоступно на стенде'); }, // Задание 07
   bookOwn(){ const e = ep('own'), s = e && currentStep(e); if (s){ state.sel.book = refKey(e, s); state.sel.slotTab = 'all'; go('appointments'); } else go('plan'); },
   async copySummary(){
     try { await navigator.clipboard.writeText(summaryText()); toast('Выжимка скопирована'); }
@@ -165,28 +165,13 @@ export const ACTIONS = {
   /* --- что на снимке --- */
   uploadOpen(){ state.role = 'patient'; go('imaging'); uploadModal(); },
   upload(){
-    if (!$('#upConsent').checked){ toast('Отметьте, что разрешаете передать исследование врачу'); return; }
-    const f = $('#upFile').files[0];
-    const st = {id:'st' + (++ui.seq), patient:patientName(), mine:true, kind:$('#upKind').value, date:'Только что', source:'Загружено пациентом', uploaded:true, file:f ? f.name : '', status:'processing'};
-    state.studies.unshift(st);
-    closeModal(); render(); toast('Исследование принято');
-    setTimeout(() => {
-      if (!state.studies.includes(st) || st.status !== 'processing') return;
-      st.status = 'awaiting';
-      if (['imaging', 'reading'].includes(state.page) && !ui.modal){ render(); toast('ИИ подготовил черновик. Его проверяет врач'); }
-    }, 1800);
+    toast('Пока недоступно на стенде'); // Задание 05
   },
   studyOpen(d){ state.sel.study = d.id; go('study'); },
   studyConfirm(d){
-    const st = state.studies.find(x => x.id === d.id), text = $('#draft').value.trim();
-    if (!text){ toast('Заключение пустое: добавьте текст'); return; }
-    st.conclusion = text; st.edited = text !== DEMO[st.kind].draft.trim();
-    st.status = 'confirmed'; st.confirmedBy = 'Д. Ершов, врач-рентгенолог'; st.confirmedAt = 'только что';
-    const e = createEpisodeFromStudy(st);
-    go('reading');
-    toast(!e ? 'Подтверждено. Маршрут не нужен: пациент получит результат и напоминание' : e.status === 'manual_review' ? 'Подтверждено. Подходящего утверждённого правила нет: нужен план врача' : 'Подтверждено. Пациент получил объяснение, координатор — обращение');
+    toast('Пока недоступно на стенде'); // Задание 05
   },
-  studyManual(d){ const st = state.studies.find(x => x.id === d.id); st.status = 'manual'; go('reading'); toast('Исследование передано на ручное описание'); },
+  studyManual(){ toast('Пока недоступно на стенде'); }, // Задание 05
 
   /* --- координатор --- */
   inboxTab(d){ state.sel.inboxTab = d.id; render(); },

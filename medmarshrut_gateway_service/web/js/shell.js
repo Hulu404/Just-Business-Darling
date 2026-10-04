@@ -22,13 +22,13 @@ export function navCount(id){
     if (id === 'pharmacy') return Object.values(state.cart).reduce((a, b) => a + b, 0);
   }
   if (state.role === 'staff'){
-    if (id === 'inbox') return state.episodes.filter(e => queueInfo(e).need).length;
+    if (id === 'inbox') return state.pathCounts?.inbox || 0;
     if (id === 'requests') return state.requests.filter(r => r.status === 'open' && waitingOn(r) === 'staff').length;
     if (id === 'pharmacyAdmin') return state.orders.filter(o => o.status === 'Собирается').length;
   }
   if (state.role === 'doctor'){
     if (id === 'reading') return state.studies.filter(s => s.status === 'awaiting').length;
-    if (id === 'doctor') return awaitingOutcome().length;
+    if (id === 'doctor') return state.doctorVisitCount || 0;
     if (id === 'requests') return state.requests.filter(r => r.status === 'open' && waitingOn(r) === 'doctor').length;
   }
   return 0;

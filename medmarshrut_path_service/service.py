@@ -70,6 +70,22 @@ def make_handler(store: EpisodeStore, shared_secret: str, admin_token: str,
 
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
+            if path == "/v1/rules/dry-run":
+                if not self._admin():
+                    self._json(403, {"error": "Administrator authorization required"})
+                    return
+                try:
+                    _, body = self._body()
+                    if set(body) != {"study_type", "anatomy", "protocol_name", "finding_code"}:
+                        raise PathError("Invalid dry-run fields")
+                    if any(not isinstance(value, str) or not value.strip() for value in body.values()):
+                        raise PathError("Invalid dry-run values")
+                    steps, reason = store.rules.plan({**body, "patient_ref": "dry-run-patient"})
+                    self._json(200, {"dry_run": True, "steps": steps,
+                                     "manual_reason": reason, "rule_version": store.rules.version})
+                except PathError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
             if path in {"/v1/reports", "/v1/episodes"}:
                 try:
                     raw, body = self._body()
@@ -174,6 +190,12 @@ def make_handler(store: EpisodeStore, shared_secret: str, admin_token: str,
                 return
             if path == "/v1/episodes":
                 self._json(200, {"episode_ids": store.list_ids()})
+                return
+            if path == "/v1/rules":
+                self._json(200, {"version": store.rules.version,
+                                 "supported_protocols": [dict(zip(("study_type", "anatomy", "protocol_name"), scope))
+                                                         for scope in sorted(store.rules.scopes)],
+                                 "rules": list(store.rules.rules.values())})
                 return
             if path == "/v1/staff/queue":
                 self._json(200, {"cases": store.coordinator_queue()})
