@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>МедМаршрут</title>
+  <style>
+    :root{--ink:#152d32;--muted:#64787c;--green:#087f72;--green2:#12a68e;--blue:#315dce;--violet:#5a3fc0;--bg:#f4f8f7;--white:#fff;--line:#dce8e6;--soft:#e9f7f3;--warn:#a76312;--warnbg:#fff3dc;--danger:#a83c3c;--dangerbg:#fff0ee;--shadow:0 18px 48px rgba(16,54,52,.08)}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,Segoe UI,Arial,sans-serif}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    h1,h2,h3,p{margin-top:0}
+    h1{font-size:clamp(31px,4vw,49px);line-height:1.12;letter-spacing:-.04em;margin-bottom:15px}
+    h2{font-size:27px;line-height:1.2;letter-spacing:-.025em;margin-bottom:9px}
+    p{color:var(--muted)}
+    .content{max-width:1240px;margin:auto;padding:36px clamp(20px,4vw,56px) 70px}
+    .brand{display:flex;align-items:center;gap:11px;font-size:20px;font-weight:800;letter-spacing:-.03em;margin-bottom:28px}
+    .brandmark{display:grid;place-items:center;width:35px;height:35px;border-radius:11px;background:linear-gradient(135deg,#12b39b,#4f7cf0);color:#fff;font-size:27px;font-weight:600;flex:none}
+    .btn{border:1px solid transparent;border-radius:11px;padding:11px 17px;background:var(--green);color:#fff;font-weight:750;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:43px;text-decoration:none}
+    .btn:hover{background:#066d62}
+    .btn.secondary{background:#fff;color:var(--green);border-color:#b8d7d0}
+    .btn.secondary:hover{background:var(--soft)}
+    .btn.small{min-height:34px;padding:7px 11px;font-size:13px}
+    .card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 8px 25px rgba(18,58,55,.035)}
+    .badge{display:inline-block;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:800;background:var(--soft);color:var(--green);white-space:nowrap}
+    .badge.orange{background:var(--warnbg);color:var(--warn)}
+    .badge.red{background:var(--dangerbg);color:var(--danger)}
+    .badge.gray{background:#edf2f1;color:#566b6d}
+    .note{border-radius:14px;background:#eef6f5;padding:15px 18px;color:#40605f;border:1px solid #d8eae6;font-size:14px}
+    .note.warn{background:var(--warnbg);border-color:#f1dfb7;color:#765024}
+    .note.red{background:var(--dangerbg);border-color:#f2c9c4;color:#863d39}
+    .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-top:22px}
+    .roles{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+    .field{display:grid;gap:6px;margin:12px 0}
+    .field select,.field input{border:1px solid var(--line);border-radius:11px;padding:9px 11px;background:#fff}
+    table{width:100%;border-collapse:collapse}
+    td,th{text-align:left;padding:9px 6px;border-bottom:1px solid var(--line)}
+    th{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+    [hidden]{display:none!important}
+  </style>
+</head>
+<body>
+  <main class="content">
+    <div class="brand"><span class="brandmark">+</span>МедМаршрут</div>
+    <h1>Следующий шаг пациента — от заключения до записи</h1>
+    <p>Временная страница шлюза. Экраны продукта появятся в следующем задании.</p>
+    <div class="note warn">Демо-стенд: роли без пароля, все данные учебные.</div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Роль этого окна</h2>
+        <p>Каждое окно работает за свою роль. Откройте второе окно и выберите в нём другую роль — они не мешают друг другу.</p>
+        <div id="current" hidden>
+          <p><span class="badge" id="current-role"></span> <strong id="current-name"></strong></p>
+          <p id="current-extra"></p>
+          <button class="btn secondary small" id="logout" type="button">Сменить роль</button>
+        </div>
+        <div id="chooser">
+          <div class="field">
+            <label for="patient-ref">Пациент (для роли «Пациент»)</label>
+            <input id="patient-ref" value="demo-patient-1" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="partner-clinic">Клиника (для роли «Партнёр»)</label>
+            <select id="partner-clinic">
+              <option value="clinic-partner-1">Диагностический центр на Лесной</option>
+              <option value="clinic-partner-2">Маммологический центр «Опора»</option>
+            </select>
+          </div>
+          <div class="roles">
+            <button class="btn" type="button" data-role="patient">Пациент</button>
+            <button class="btn" type="button" data-role="staff">Сотрудник</button>
+            <button class="btn" type="button" data-role="doctor">Врач</button>
+            <button class="btn" type="button" data-role="partner">Партнёр</button>
+          </div>
+        </div>
+        <div class="note red" id="error" hidden></div>
+      </section>
+
+      <section class="card">
+        <h2>Состояние сервисов</h2>
+        <p id="imaging-mode"></p>
+        <table>
+          <thead><tr><th>Сервис</th><th>Порт</th><th>Состояние</th></tr></thead>
+          <tbody id="services"></tbody>
+        </table>
+        <p id="health-note"></p>
+      </section>
+    </div>
+  </main>
+  <script src="/assets/js/boot.js"></script>
+</body>
+</html>

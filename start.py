@@ -24,27 +24,46 @@ CLINICS = ("clinic-central", "clinic-partner-1", "clinic-partner-2")
 SECRET_NAMES = ("PATH_SHARED_SECRET", "PATH_ADMIN_TOKEN", "PATH_PATIENT_TOKEN", "REVIEWER_TOKEN",
                 "CLINIC_SHARED_SECRET", "CLINIC_ADMIN_TOKEN", "CLINIC_STAFF_TOKENS")
 
-# Processes of the stand, in start order. Task 02 adds the gateway here.
+# Processes of the stand, in start order. "env" gets (secrets, state folder, image mode).
 SERVICES = [
     {"name": "path", "title": "сервис пути", "port": 8765,
      "script": {"demo": "medmarshrut_path_service/service.py", "real": "medmarshrut_path_service/service.py"},
-     "env": lambda s, state: {"PATH_SHARED_SECRET": s["PATH_SHARED_SECRET"], "PATH_ADMIN_TOKEN": s["PATH_ADMIN_TOKEN"],
+     "env": lambda s, state, mode: {"PATH_SHARED_SECRET": s["PATH_SHARED_SECRET"], "PATH_ADMIN_TOKEN": s["PATH_ADMIN_TOKEN"],
                               "PATH_PATIENT_TOKEN": s["PATH_PATIENT_TOKEN"], "PATH_DB": str(state / "path.sqlite3"),
                               "PATH_RULES": str(DEMO / "rules.demo.json")},
      "pages": ["/staff", "/patient"]},
     {"name": "clinic", "title": "сервис клиники", "port": 8764,
      "script": {"demo": "medmarshrut_clinic_service/service.py", "real": "medmarshrut_clinic_service/service.py"},
-     "env": lambda s, state: {"CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"], "CLINIC_ADMIN_TOKEN": s["CLINIC_ADMIN_TOKEN"],
+     "env": lambda s, state, mode: {"CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"], "CLINIC_ADMIN_TOKEN": s["CLINIC_ADMIN_TOKEN"],
                               "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "CLINIC_DB": str(state / "clinic.sqlite3"),
                               "CLINIC_NETWORK": str(DEMO / "network.demo.json")},
      "pages": ["/staff"]},
     {"name": "image", "title": "сервис снимков", "port": 8766,
      "script": {"demo": "demo_stand/image_demo_runner.py", "real": "medmarshrut_image_service/service.py"},
-     "env": lambda s, state: {"REVIEWER_TOKEN": s["REVIEWER_TOKEN"], "PATH_SHARED_SECRET": s["PATH_SHARED_SECRET"],
+     "env": lambda s, state, mode: {"REVIEWER_TOKEN": s["REVIEWER_TOKEN"], "PATH_SHARED_SECRET": s["PATH_SHARED_SECRET"],
                               "ROUTER_URL": "http://127.0.0.1:8765/v1/reports",
                               "DEMO_STUDY_INDEX": str(state / "kit" / "index.json")},
      "pages": []},
+    {"name": "gateway", "title": "шлюз и веб-приложение", "port": 8763, "health": "/api/health",
+     "script": {"demo": "medmarshrut_gateway_service/service.py", "real": "medmarshrut_gateway_service/service.py"},
+     "env": lambda s, state, mode: {"REVIEWER_TOKEN": s["REVIEWER_TOKEN"], "PATH_ADMIN_TOKEN": s["PATH_ADMIN_TOKEN"],
+                                    "CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"],
+                                    "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "GATEWAY_HOME_CLINIC": "clinic-central",
+                                    "GATEWAY_STATE_DIR": str(state), "GATEWAY_PEOPLE": str(DEMO / "people.demo.json"),
+                                    "GATEWAY_IMAGING_MODE": imaging_mode(mode)},
+     "pages": []},
 ]
+APP_URL = f"http://{HOST}:8763"
+# Inherited variables that would silently change what the stand runs.
+STRIPPED_ENV = {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB", "PATH_RULES", "CLINIC_NETWORK",
+                "DEMO_STUDY_INDEX", "PATH_MIS_TOKEN", "CLINIC_MIS_TOKEN", "IMAGE_URL", "PATH_URL", "CLINIC_URL",
+                "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT"}
+
+
+def imaging_mode(mode: str) -> str:
+    if mode == "demo":
+        return "demo-scripted"
+    return "model" if os.environ.get("MODEL_CONFIG") else "no-model"
 
 
 def say(text: str = "") -> None:
@@ -59,8 +78,7 @@ def make_secrets() -> dict[str, str]:
 
 def base_env(image_mode: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items()
-           if k not in SECRET_NAMES and k not in {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB",
-                                                   "PATH_RULES", "CLINIC_NETWORK", "DEMO_STUDY_INDEX"}}
+           if k not in SECRET_NAMES and k not in STRIPPED_ENV}
     if image_mode == "demo":
         env.pop("MODEL_CONFIG", None)
     env.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
@@ -106,6 +124,7 @@ class Stand:
     def __init__(self, state: Path, image_mode: str, values: dict[str, str]):
         self.state, self.image_mode, self.values = state, image_mode, values
         self.procs: list[tuple[dict, subprocess.Popen, Path]] = []
+        self.reported: set[str] = set()
 
     def tool_env(self) -> dict[str, str]:
         return {**base_env(self.image_mode), **self.values, "DEMO_STATE_DIR": str(self.state),
@@ -118,7 +137,7 @@ class Stand:
             out = self.state / "logs" / f"{service['name']}.out.log"
             with open(out, "wb") as stdout, open(err, "wb") as stderr:
                 proc = subprocess.Popen([sys.executable, "-B", str(ROOT / service["script"][self.image_mode])],
-                                        cwd=ROOT, env={**base_env(self.image_mode), **service["env"](self.values, self.state)},
+                                        cwd=ROOT, env={**base_env(self.image_mode), **service["env"](self.values, self.state, self.image_mode)},
                                         stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL, creationflags=flags)
             self.procs.append((service, proc, err))
         for service, proc, err in self.procs:
@@ -137,7 +156,7 @@ class Stand:
             if proc.poll() is not None:
                 return False
             try:
-                with urlopen(f"http://{HOST}:{service['port']}/health", timeout=1) as response:
+                with urlopen(f"http://{HOST}:{service['port']}{service.get('health', '/health')}", timeout=3) as response:
                     if response.status == 200:
                         return True
             except (URLError, OSError):
@@ -148,11 +167,14 @@ class Stand:
     def run_tool(self, script: str) -> int:
         return subprocess.run([sys.executable, "-B", str(DEMO / script)], cwd=DEMO, env=self.tool_env()).returncode
 
-    def dead(self) -> tuple[dict, Path] | None:
+    def newly_dead(self) -> list[tuple[dict, Path]]:
+        """Processes that stopped since the last check; each is reported once."""
+        found = []
         for service, proc, err in self.procs:
-            if proc.poll() is not None:
-                return service, err
-        return None
+            if proc.poll() is not None and service["name"] not in self.reported:
+                self.reported.add(service["name"])
+                found.append((service, err))
+        return found
 
     def stop(self) -> None:
         for _, proc, _ in reversed(self.procs):
@@ -236,15 +258,16 @@ def main() -> int:
         for service in SERVICES:
             for page in service["pages"]:
                 say(f"  встроенная страница ({service['title']}): http://{HOST}:{service['port']}{page}")
+        say()
+        say(f"Откройте приложение: {APP_URL}")
         say("Стенд работает. Остановить — Ctrl+C.")
         while True:
             time.sleep(0.5)
-            failed = stand.dead()
-            if failed:
-                service, err = failed
-                say(f"{service['title']} неожиданно остановился. Последние строки журнала ошибок:")
+            for service, err in stand.newly_dead():
+                title = service["title"][0].upper() + service["title"][1:]
+                say(f"{title} остановился. Остальные процессы работают, в приложении он отмечен "
+                    f"недоступным. Чтобы вернуть его, перезапустите стенд. Последние строки журнала ошибок:")
                 say(tail(err))
-                return 1
     except KeyboardInterrupt:
         say("\nОстанавливаю стенд…")
         return 0

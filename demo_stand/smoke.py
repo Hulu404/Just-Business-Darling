@@ -1,4 +1,4 @@
-"""End-to-end smoke check of the demo stand on its own synthetic patient."""
+"""End-to-end smoke check of the demo stand on its own synthetic patient, services and gateway."""
 from __future__ import annotations
 
 import secrets
@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from stand_api import (DEMO_DIR, StandError, clinic_signed, clinic_staff, confirm, env, expect, find_episode,
+from stand_api import (DEMO_DIR, GATEWAY, StandError, call, clinic_signed, clinic_staff, confirm, env, expect, find_episode,
                        load_json, path_post, review, step_action, upload_kit, upload_study, utf8_console)
 from synthetic_dicom import build_study
 
@@ -147,6 +147,21 @@ def main() -> int:
               f"эпизод маммографии: {episode and (episode['status'], episode['manual_reason'])}")
         return "эпизод в manual_review, причина rule_not_approved"
 
+    def step11():
+        status, health = call("GET", GATEWAY + "/api/health")
+        expect(status, health, 200, "Состояние через шлюз")
+        down = [name for name, info in health["services"].items() if info["status"] != "up"]
+        check(not down and health["auth"] == "demo-roles" and health["imaging_mode"] == "demo-scripted",
+              f"состояние через шлюз: {health}")
+        status, session = call("POST", GATEWAY + "/api/session", {"role": "patient", "patient_ref": ref},
+                               headers={"X-MM-Role": "patient"})
+        expect(status, session, 201, "Сессия пациента через шлюз")
+        check(session == {"role": "patient", "name": "Пациент", "patient_ref": ref}, f"сессия: {session}")
+        status, foreign = call("POST", GATEWAY + "/api/session", {"role": "patient", "patient_ref": "no-such-patient"},
+                               headers={"X-MM-Role": "patient"})
+        check(status == 400, f"шлюз пустил незарегистрированного пациента: {status} {foreign}")
+        return "три сервиса работают, сессия пациента создаётся, чужой псевдоним отклонён"
+
     steps = [("Регистрация пациента в сервисе клиники", step1),
              ("Загрузка учебной КТ", step2),
              ("Загрузка КТ не из учебного набора", step3),
@@ -156,7 +171,8 @@ def main() -> int:
              ("Первый цикл до итога врача", step7),
              ("Отказ и пересмотр плана", step8),
              ("Направление партнёру", step9),
-             ("Учебная маммография без утверждённого правила", step10)]
+             ("Учебная маммография без утверждённого правила", step10),
+             ("Шлюз", step11)]
     print(f"Смоук-проверка на пациенте {ref}", flush=True)
     for number, (title, run) in enumerate(steps, 1):
         try:

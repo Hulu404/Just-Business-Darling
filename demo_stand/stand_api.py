@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 IMAGE = "http://127.0.0.1:8766"
 PATH = "http://127.0.0.1:8765"
 CLINIC = "http://127.0.0.1:8764"
+GATEWAY = "http://127.0.0.1:8763"
 DEMO_DIR = Path(__file__).resolve().parent
 
 
