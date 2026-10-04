@@ -321,6 +321,50 @@ class StudyRouteTests(GatewayTestCase):
         self.assertEqual([i["label"] for i in study["images"]], ["Срез 1 из 3", "Срез 2 из 3", "Срез 3 из 3"])
         self.assertNotIn("draft", body)
 
+    def test_preview_shows_step_by_approved_rule(self):
+        sent = []
+
+        def dry_run(request):
+            sent.append(json.loads(request["body"]))
+            return 200, {"dry_run": True, "steps": [{"title": "Приём терапевта в течение 24 часов"}],
+                         "manual_reason": None, "rule_version": "demo-rules-7"}
+        self.path.routes[("POST", "/v1/rules/dry-run")] = dry_run
+        self.login("doctor")
+        _, _, body = self.call("GET", "/api/doctor/studies/job-own", role="doctor")
+        preview = body["study"]["preview"]["DEMO_CT_INFILTRATE"]
+        self.assertEqual([s["title"] for s in preview["steps"]], ["Приём терапевта в течение 24 часов"])
+        self.assertIsNone(preview["manual_reason"])
+        self.assertEqual(preview["rule_version"], "demo-rules-7")
+        self.assertEqual(preview["explanation"]["means"], "Терапевт посмотрит вас на приёме")
+        # confidence не уходит в сервис пути и не возвращается в предпросмотре
+        self.assertEqual(sent[-1], {"study_type": "ct", "anatomy": "CHEST",
+                                    "protocol_name": "CHEST_STANDARD", "finding_code": "DEMO_CT_INFILTRATE"})
+        self.assertNotIn("confidence", preview)
+
+    def test_preview_shows_manual_reason_for_unapproved_rule(self):
+        self.path.routes[("POST", "/v1/rules/dry-run")] = (200, {"dry_run": True, "steps": [],
+            "manual_reason": "rule_not_approved", "rule_version": "demo-rules-7"})
+        self.login("doctor")
+        _, _, body = self.call("GET", "/api/doctor/studies/job-own", role="doctor")
+        preview = body["study"]["preview"]["DEMO_CT_INFILTRATE"]
+        self.assertEqual(preview["steps"], [])
+        self.assertEqual(preview["manual_reason"], "rule_not_approved")
+
+    def test_preview_is_null_when_path_service_is_down(self):
+        self.path.mode = "drop"
+        self.login("doctor")
+        status, _, body = self.call("GET", "/api/doctor/studies/job-own", role="doctor")
+        self.assertEqual(status, 200, body)
+        self.assertIsNone(body["study"]["preview"])
+
+    def test_preview_is_doctor_only(self):
+        self.path.routes[("POST", "/v1/rules/dry-run")] = (200, {"dry_run": True, "steps": [],
+            "manual_reason": None, "rule_version": "demo-rules-7"})
+        for role in ("patient", "staff"):
+            self.login(role)
+            status, _, _ = self.call("GET", "/api/doctor/studies/job-own", role=role)
+            self.assertEqual(status, 403, role)
+
     def test_template_of_a_real_model_has_no_scores_or_uids(self):
         self.jobs["job-own"] = job("job-own", demo=False)
         self.login("doctor")

@@ -882,7 +882,32 @@ class Gateway:
                         test_message="Техническая проверка, анализ не выполнялся" if job.get("status") == "test_only" else None,
                         templates=conclusion_templates(job, item["title"], self.demo_texts)
                         if job.get("status") == "awaiting_physician" else {})
+            if job.get("status") == "awaiting_physician":
+                item["preview"] = self._study_preview(job)
         return 200, {"study": item}
+
+    def _study_preview(self, job: dict) -> dict | None:
+        """Предпросмотр шага по каждой находке: dry-run правил клиники (шаги или причина ручного разбора
+        и версия правил) плюс утверждённое объяснение из finding_texts или None. confidence в запрос
+        не входит. Сервис пути недоступен — None, остальной ответ прежний."""
+        study = job.get("study") or {}
+        scope = {"study_type": MODALITY_TYPES.get(study.get("modality")),
+                 "anatomy": study.get("anatomy"), "protocol_name": study.get("protocol_name")}
+        codes = list(dict.fromkeys(f.get("code") for f in (job.get("result") or {}).get("findings") or [] if f.get("code")))
+        if not codes or not all(isinstance(value, str) and value for value in scope.values()):
+            return None
+        store = self.data_store()
+        preview: dict[str, dict] = {}
+        try:
+            for code in codes:
+                result = self.upstream.json("path", "POST", "/v1/rules/dry-run",
+                                            body={**scope, "finding_code": code}, auth="path_admin")
+                preview[code] = {"steps": result.get("steps") or [], "manual_reason": result.get("manual_reason"),
+                                 "rule_version": result.get("rule_version"),
+                                 "explanation": store.explanation(self.config.home_clinic, code)}
+        except GatewayError:
+            return None
+        return preview
 
     def doctor_image(self, ctx: Context) -> tuple[int, RawResponse]:
         row = self._registry_row(ctx.params["id"])

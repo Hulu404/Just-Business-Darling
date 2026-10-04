@@ -18,7 +18,11 @@
   - Константа `BRAND_FONT = web/fonts/Stolzl-Regular.otf`; `GET /api/health` отдаёт `brand_font` (`.is_file()`).
   - Тесты (`StaticTests`): `.otf`/`.webp` отдаются с верным типом на временной папке (патч `service.WEB_DIR`, шрифта в git нет); `/assets/index.txt` 404; CSP содержит `font-src 'self'` и `script-src 'self'`; `brand_font` false без файла, true с файлом (патч `service.BRAND_FONT`). Строка в README шлюза.
   - Проверка (быстрая): image 20, path 12, clinic 8, medications 10, gateway 90 OK (было 87, +3 теста; skipped=6 — PostgreSQL). Отступлений нет.
-- [ ] Цикл 2. Шлюз: предпросмотр шага
+- [x] **Цикл 2. Шлюз: предпросмотр шага** — 2026-10-04 22:40
+  - `GET /api/doctor/studies/{id}` для `awaiting_physician` отдаёт `item["preview"]`: по каждому коду находки `POST /v1/rules/dry-run` сервиса пути (`study_type` из `MODALITY_TYPES`, `anatomy`, `protocol_name`, `finding_code`) → `steps`, `manual_reason`, `rule_version`, плюс `explanation` из `store.explanation` или `null`. `confidence` в запрос не входит. Сервис пути недоступен (`GatewayError`) или scope неполный — `preview: null`.
+  - Helper `_study_preview(job)` в `service.py`. Строка в README шлюза.
+  - Тесты (`test_imaging.StudyRouteTests`, +4): шаг по утверждённому правилу (и проверка тела запроса без `confidence`); причина при неутверждённом; `preview: null` при `path.mode="drop"`; 403 пациенту и координатору.
+  - Проверка (быстрая): image 20, path 12, clinic 8, medications 10, gateway 94 OK (было 90, +4; skipped=6). Отступлений нет.
 - [ ] Цикл 3. Шлюз: место и специалист записи
 - [ ] Цикл 4. Каркас кабинета
 - [ ] Цикл 5. «Исследования»

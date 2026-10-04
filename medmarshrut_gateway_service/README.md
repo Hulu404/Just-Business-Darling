@@ -65,7 +65,7 @@ python .\medmarshrut_gateway_service\service.py
 | `GET /api/patient/studies` | пациент | свои исследования: до подтверждения только статус, после — заключение врача, объяснение, шаг плана, срез |
 | `GET /api/patient/studies/{id}/images/{sop_uid}.png` | пациент | срез своего исследования, только после подтверждения |
 | `GET /api/doctor/studies` | врач | реестр плюс `GET /v1/review/{id}` по каждой записи |
-| `GET /api/doctor/studies/{id}` | врач | срезы, признаки с местом, ограничения модели, сведения о файлах, заготовка заключения |
+| `GET /api/doctor/studies/{id}` | врач | срезы, признаки с местом, ограничения модели, сведения о файлах, заготовка заключения; у исследования в `awaiting_physician` — `preview` по каждому коду находки (шаги или причина ручного разбора и версия правил через `POST /v1/rules/dry-run`, плюс утверждённое объяснение или `null`). `confidence` в запрос не входит; сервис пути недоступен — `preview: null` |
 | `GET /api/doctor/studies/{id}/images/{sop_uid}.png` | врач | срез в PNG |
 | `POST /api/doctor/studies/{id}/confirm` | врач | `{"conclusion", "finding_code"?}` → `POST /v1/review/{id}`; итог: эпизод и первый шаг или причина |
 | `GET /api/staff/studies/manual` | сотрудник, врач | «Снимки на ручном описании» и подтверждения, не дошедшие до сервиса маршрута; без причины и вывода модели |
