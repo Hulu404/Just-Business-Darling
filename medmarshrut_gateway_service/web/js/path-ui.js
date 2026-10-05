@@ -7,7 +7,7 @@ import { demoSource, manualStudiesBlock } from './imaging-ui.js';
 import { caseClinicActions, caseClinicBlocks } from './clinic-ui.js';
 
 const routePages = new Set(['home', 'plan', 'appointments', 'inbox', 'case', 'scheduling']);
-export const isPathPage = () => routePages.has(state.page) && (state.role === 'patient' || state.role === 'staff' || state.role === 'doctor');
+export const isPathPage = () => routePages.has(state.page) && (state.role === 'patient' || state.role === 'staff');
 const path = {role:null, status:'loading', items:[], requests:[], message:'', slots:[], slotStatus:'loading', slotMessage:'', slotKey:''};
 const fmt = value => { if (!value) return ''; const d = new Date(value); return Number.isNaN(+d) ? String(value) : new Intl.DateTimeFormat('ru-RU', {day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'}).format(d); };
 export const current = e => e.steps.find(s => !['completed', 'superseded', 'closed'].includes(s.status));
@@ -135,9 +135,6 @@ export function pathInbox(){
 
 function staffActions(e){
   const s = current(e);
-  if (state.role === 'doctor') return e.status === 'manual_review' ? btn('Назначить план', 'pathPlanOpen', '', {id:e.id}) :
-    e.status === 'paused' ? btn('Изменить план', 'pathReviseOpen', '', {id:e.id}) :
-    s?.status === 'confirmed' || s?.status === 'attended' ? btn('Итог приёма', 'pathOutcomeOpen', '', {id:e.id, step:s.id}) : '';
   if (state.role !== 'staff') return '';
   if (!s) return e.steps.every(x => ['completed','superseded'].includes(x.status)) && e.status === 'active' ?
     btn('Закрыть маршрут', 'pathStaffEpisodeOpen', '', {id:e.id, act:'close'}) : '';

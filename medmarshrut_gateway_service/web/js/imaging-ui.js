@@ -3,21 +3,18 @@
 import { api, imageUrl, uploadArchive } from './api.js';
 import { icon } from './icons.js';
 import { sessions, state, ui } from './state.js';
-import { $, badge, btn, closeModal, errorNote, go, loadingCards, modalHead, navBtn, openModal, plural, safe, toast } from './ui.js';
+import { $, badge, btn, closeModal, errorNote, go, loadingCards, modalHead, navBtn, openModal, safe, toast } from './ui.js';
 import { render } from './shell.js';
 
 const MAX_ARCHIVE = 50 * 1024 * 1024;
-const MAX_TEXT = 3500;
-const HERE = {patient:['imaging'], doctor:['reading', 'study', 'inbox'], staff:['inbox']};
+const HERE = {patient:['imaging'], staff:['inbox']};
 export const isImagingPage = () => (HERE[state.role] || []).includes(state.page);
-/* Список перечитывается раз в 15 секунд; экран «Снимок и заключение» — только при входе: там врач правит текст */
-export const isImagingListPage = () => isImagingPage() && state.page !== 'study';
+/* Список перечитывается раз в 15 секунд. Исследования врача — в кабинете rescan (rescan-studies.js) */
+export const isImagingListPage = isImagingPage;
 
-const data = {role:null, page:null, status:'loading', message:'', items:[], detail:null, detailId:null,
-              manual:[], notRouted:[], kit:null, index:0, drafts:{}, code:null, busy:false,
-              assistant:null, suggest:null, suggesting:false, explain:{}};  // задание 11: ИИ-помощник
+const data = {role:null, page:null, status:'loading', message:'', items:[], manual:[], notRouted:[], busy:false,
+              assistant:null, explain:{}};  // задание 11: ИИ-помощник
 const blobs = new Map();
-const known = new Set();  // идентификаторы из списка врача: старый выбор из демо-состояния в шлюз не уходит
 const enc = encodeURIComponent;
 const fmt = value => { if (!value) return ''; const d = new Date(value); return Number.isNaN(+d) ? String(value) : new Intl.DateTimeFormat('ru-RU', {day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'}).format(d); };
 const ready = () => data.role === state.role && data.page === state.page && data.status === 'ok';
@@ -29,35 +26,16 @@ const DEMO_NOTE = 'Демо-сценарий: признак задан зара
 export async function refreshImaging(){
   if (!isImagingPage() || sessions[state.role]?.status !== 'ok') return;
   const role = state.role, page = state.page;
-  if (page === 'study' && !known.has(state.sel.study)){
-    try { remember((await api('GET', '/api/doctor/studies', {role})).studies || []); } catch (err){ /* покажет ошибка ниже */ }
-    const list = [...known.values()];
-    if (!known.has(state.sel.study)) state.sel.study = list[0] || null;
-  }
-  const id = state.sel.study;
-  const fresh = data.role !== role || data.page !== page || (page === 'study' && data.detailId !== id);
-  if (fresh){ Object.assign(data, {role, page, status:'loading', message:''}); if (page === 'study') Object.assign(data, {detail:null, detailId:id, index:0, drafts:{}, code:null, suggest:null}); render(); }
+  if (data.role !== role || data.page !== page){ Object.assign(data, {role, page, status:'loading', message:''}); render(); }
   /* Без ключа в шлюзе кнопок помощника нет; ошибка запроса — тоже «выключен», экран работает как раньше */
-  if (data.assistant === null && (page === 'imaging' || page === 'study'))
+  if (data.assistant === null && page === 'imaging')
     data.assistant = await api('GET', '/api/assistant/status', {role}).then(r => r.enabled === true, () => false);
   try {
     if (page === 'imaging') data.items = (await api('GET', '/api/patient/studies', {role})).studies || [];
-    else if (page === 'reading'){ data.items = remember((await api('GET', '/api/doctor/studies', {role})).studies || []); state.readingCount = data.items.filter(s => s.status === 'awaiting_physician').length; }
-    else if (page === 'study'){
-      if (!id){ data.detail = null; data.status = 'empty'; render(); return; }
-      data.detail = (await api('GET', `/api/doctor/studies/${enc(id)}`, {role})).study;
-      const first = data.detail.images?.findIndex(x => x.sop_uid === data.detail.findings?.[0]?.sop_uid);
-      if (fresh && first > 0) data.index = first;
-    } else if (page === 'inbox'){ const r = await api('GET', '/api/staff/studies/manual', {role}); data.manual = r.manual || []; data.notRouted = r.not_routed || []; }
+    else if (page === 'inbox'){ const r = await api('GET', '/api/staff/studies/manual', {role}); data.manual = r.manual || []; data.notRouted = r.not_routed || []; }
     data.status = 'ok';
   } catch (err){ data.status = 'error'; data.message = 'Не удалось загрузить исследования. ' + err.message; }
   if (state.role === role && state.page === page && !ui.modal) render();
-}
-
-function remember(items){
-  known.clear();
-  [...items].sort((a, b) => (b.status === 'awaiting_physician') - (a.status === 'awaiting_physician')).forEach(s => known.add(s.id));
-  return items;
 }
 
 /* Картинки: <img data-api-src> получает blob:-адрес после отрисовки, без повторной отрисовки экрана */
@@ -131,82 +109,6 @@ export function uploadModal(){
     <div id="upKit"></div>`);
 }
 
-/* ---------- Врач: список ---------- */
-const STATUS = {awaiting_physician:['Ждёт проверки', 'orange'], confirmed:['Подтверждено врачом', ''], manual_review:['Ручное описание', 'gray'],
-                test_only:['Техническая проверка', 'gray'], unavailable:['Недоступно', 'red'], processing:['Обрабатывается', 'blue']};
-const studyBadge = st => badge(...(STATUS[st.status] || [st.status, 'gray']));
-const findingLine = f => `${safe(f.description)}, ${safe(f.place).toLowerCase()}${f.confidence != null ? `. Оценка модели ${safe(f.confidence)}` : ''}`;
-const nextText = n => !n ? '' : n.warning ? `<span class="badge red">${safe(n.warning)}</span>` : n.step ? safe(n.step) : n.reason ? 'Ручной разбор: ' + safe(n.reason).toLowerCase() : safe(n.status);
-export function readingPage(){
-  const intro = head('Черновики ИИ на проверку', 'ИИ готовит черновик заключения, врач его подтверждает. До этого ни пациент, ни координатор результата не видят.');
-  if (!ready()) return intro + gate();
-  const by = status => data.items.filter(s => s.status === status);
-  const wait = by('awaiting_physician'), done = by('confirmed'), manual = by('manual_review').concat(by('test_only')), gone = by('unavailable');
-  const open = st => btn('Открыть', 'studyOpen', 'secondary small', {id:st.id});
-  return intro + `<div class="grid three" style="margin-bottom:18px"><div class="card"><div class="metric">${wait.length}</div><span class="muted">${plural(wait.length, ['ждёт', 'ждут', 'ждут'])} проверки</span></div><div class="card"><div class="metric">${done.length}</div><span class="muted">подтверждено</span></div><div class="card"><div class="metric">${done.filter(s => s.confirmation?.edited).length}</div><span class="muted">черновиков исправлено врачом</span></div></div>
-    <div class="sectionhead" style="margin-top:8px"><h2>Ждут проверки</h2></div>
-    ${wait.length ? `<div class="grid two">${wait.map(st => `<div class="card">${studyBadge(st)}<h3 style="margin-top:13px">${safe(st.patient)}</h3><p>${safe(st.title)} · ${safe(fmt(st.created_at))}<br>ИИ: ${st.findings.map(findingLine).join('; ')}${st.demo ? '<br><span class="muted">Демо-сценарий</span>' : ''}</p><div class="actions">${btn('Открыть снимок', 'studyOpen', 'small', {id:st.id})}</div></div>`).join('')}</div>` : '<div class="panel empty"><h3>Всё проверено</h3><p>Новые исследования появятся здесь, когда придут из РИС или от пациента.</p></div>'}
-    <div class="sectionhead"><h2>Подтверждённые</h2></div>
-    <div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Исследование</th><th>Находка</th><th>Что дальше</th><th></th></tr></thead><tbody>
-      ${done.map(st => `<tr><td><strong>${safe(st.patient)}</strong></td><td>${safe(st.title)}<small>${safe(fmt(st.confirmation?.confirmed_at))}</small></td><td>${safe(st.findings.find(f => f.code === st.confirmation?.finding_code)?.description || st.confirmation?.finding_code)}${st.confirmation?.edited ? '<small>черновик исправлен</small>' : ''}</td><td>${nextText(st.next)}</td><td>${open(st)}</td></tr>`).join('') || '<tr><td colspan="5">Подтверждённых исследований пока нет.</td></tr>'}
-    </tbody></table></div>
-    <div class="sectionhead"><h2>Ручное описание</h2></div>
-    <div class="tablewrap"><table><thead><tr><th>Пациент</th><th>Исследование</th><th>Причина</th><th></th></tr></thead><tbody>
-      ${manual.map(st => `<tr><td><strong>${safe(st.patient)}</strong></td><td>${safe(st.title)}<small>${safe(fmt(st.created_at))}</small></td><td>${st.status === 'test_only' ? 'Техническая проверка, анализ не выполнялся' : safe(st.reason?.text)}${st.reason ? `<small>${safe(st.reason.original)}</small>` : ''}</td><td>${open(st)}</td></tr>`).join('') || '<tr><td colspan="4">Исследований на ручном описании нет.</td></tr>'}
-    </tbody></table></div>
-    ${gone.length ? `<div class="sectionhead"><h2>Недоступны</h2></div><div class="note">${gone.map(st => `${safe(st.patient)}, ${safe(st.title)}: ${safe(st.message)}`).join('<br>')}</div>` : ''}`;
-}
-
-/* ---------- Врач: снимок и заключение ---------- */
-function viewer(st){
-  const list = st.images || [];
-  if (!list.length) return `<div class="viewer"><p style="margin:12px">Срезов нет: архив не прошёл проверку сервиса снимков.</p></div>`;
-  const i = Math.min(data.index, list.length - 1), img = list[i];
-  const hit = (st.findings || []).find(f => f.sop_uid === img.sop_uid);
-  return `<div class="viewer"><img class="studyimg" alt="${safe(img.label)}" data-api-src="/api/doctor/studies/${enc(st.id)}/images/${enc(img.sop_uid)}.png">
-    <div class="cap"><span>${safe(img.label)}${hit ? ' · ' + safe(hit.place) : ''}</span><span>${VIEW_NOTE}</span></div>
-    <div class="viewnav">${btn('← Назад', 'studyStep', 'secondary small', {step:-1})}<span>${i + 1} из ${list.length}</span>${btn('Вперёд →', 'studyStep', 'secondary small', {step:1})}</div></div>`;
-}
-function draftPanel(st){
-  const codes = Object.keys(st.templates || {});
-  const code = data.code && codes.includes(data.code) ? data.code : codes[0];
-  const text = data.drafts[code] ?? st.templates[code] ?? '';
-  const choose = codes.length > 1 ? `<div class="field"><label>Какой признак вы подтверждаете</label>${st.findings.filter(f => codes.includes(f.code)).map(f => `<label class="checkline" style="margin-bottom:8px"><input type="radio" name="studyCode" value="${safe(f.code)}" data-action="studyCode" data-code="${safe(f.code)}" ${f.code === code ? 'checked' : ''}><span><strong>${safe(f.description)}</strong><br><span class="muted">${safe(f.place)}</span></span></label>`).join('')}</div>` : '';
-  return `<div class="panel"><h3>Черновик заключения</h3>${choose}
-    <div class="field"><textarea id="studyDraft" data-code="${safe(code)}" maxlength="${MAX_TEXT}" style="min-height:190px" aria-label="Текст заключения">${safe(text)}</textarea><small><span id="draftCount">${text.length}</span> из ${MAX_TEXT} символов. Заготовка без оценок модели: прочитайте, исправьте и подтвердите.</small></div>
-    <div class="actions">${btn(data.busy ? 'Подтверждаем…' : 'Подтвердить заключение', 'studyConfirm', '', {id:st.id, code})}${data.assistant ? btn(data.suggesting ? 'Готовим вариант…' : 'Улучшить формулировку', 'studyRewrite', 'secondary', {id:st.id, code}) : ''}</div>
-    ${data.suggest && data.suggest.code === code ? suggestNote(data.suggest.text) : ''}</div>`;
-}
-/* Вариант помощника не попадает в поле сам: только по кнопке «Подставить» */
-const suggestNote = text => `<div class="note" style="margin-top:14px"><div class="eyebrow">Черновик ИИ-помощника</div><p style="margin:6px 0 0">${safe(text).replace(/\n+/g, '<br>')}</p><p class="muted" style="font-size:13px;margin:8px 0 0">Прочитайте перед тем, как подставить. Заключение подтверждаете вы.</p><div class="actions" style="margin-top:12px">${btn('Подставить', 'studySuggestUse', 'small')}${btn('Не нужно', 'studySuggestDrop', 'secondary small')}</div></div>`;
-function afterPanel(st){
-  const c = st.confirmation, n = st.next || {};
-  const caseBtn = n.episode_id ? `<button class="btn secondary small" data-case="${safe(n.episode_id)}">Открыть обращение</button>` : '';
-  const what = n.warning ? `<div class="note red">${safe(n.warning)}</div>` : n.step ? `<p style="margin:0">Шаг по правилу: <strong>${safe(n.step)}</strong></p>` : n.reason ? `<div class="note warn">Ручной разбор: ${safe(n.reason)}</div>` : '';
-  return `<div class="panel"><h3>Заключение</h3><div class="quote">${safe(c.conclusion).replace(/\n+/g, '<br>')}</div><p style="margin:12px 0 0">${safe(c.physician_id)}, подтверждено ${safe(fmt(c.confirmed_at))}${c.edited ? ' · черновик исправлен' : ''}</p></div>
-    <div class="panel"><h3>Что дальше</h3>${what}${caseBtn ? `<div class="actions">${caseBtn}</div>` : ''}</div>`;
-}
-export function studyPage(){
-  const back = navBtn('← К списку', 'reading', 'secondary');
-  const st = data.detail;
-  if (data.role === state.role && data.page === state.page && data.status === 'empty') return head('Снимок и заключение', '', back) + '<div class="panel empty"><h3>Исследований пока нет</h3><p>Новые исследования появятся в списке, когда придут из РИС или от пациента.</p></div>';
-  if (!ready() || !st) return head('Снимок и заключение', '', back) + gate();
-  const source = st.uploaded_by_role === 'patient' ? 'загрузил пациент' : 'выгрузка из РИС, демо';
-  const intro = head(safe(st.patient), `${safe(st.title)} · ${safe(fmt(st.created_at))} · ${source}`, studyBadge(st) + back);
-  if (st.status === 'unavailable') return intro + `<div class="note">${safe(st.message)}. Попросите загрузить исследование заново.</div>`;
-  const info = st.study;
-  const findings = st.findings.length ? st.findings.map(f => `<div class="finding"><span class="dot now"></span><span><strong>${safe(f.description)}</strong><small>${safe(f.place)}</small>${f.confidence != null ? `<small>Оценка модели: ${safe(f.confidence)}</small>` : ''}</span></div>`).join('')
-    : st.status === 'test_only' ? `<p>${safe(st.test_message)}</p>` : `<p>${safe(st.reason?.text || 'Находок нет.')}</p>${st.reason ? `<p class="muted" style="font-size:13px">Сервис снимков: ${safe(st.reason.original)}</p>` : ''}`;
-  const right = st.status === 'awaiting_physician' ? draftPanel(st) : st.status === 'confirmed' ? afterPanel(st)
-    : `<div class="panel"><h3>Заключение</h3><p style="margin:0">${st.status === 'test_only' ? 'Техническая проверка, анализ не выполнялся. Подтвердить нельзя.' : 'Подтвердить нельзя: сервис принимает заключение только с находкой модели. Врач описывает исследование сам, координатор видит его в группе «Снимки на ручном описании».'}</p></div>`;
-  return intro + `${st.demo ? `<div class="note warn" style="margin-bottom:18px">${DEMO_NOTE}</div>` : ''}
-    <div class="twocol study"><div class="stack">${viewer(st)}
-        <div class="note">Модель отмечает только те находки, на которые её проверяли. ${info?.modality === 'MG' ? 'Категорию BI-RADS сервис не присваивает: её указывает врач.' : 'Если протокол или область не подходят модели, исследование сразу уходит на ручное описание.'}</div></div>
-      <div class="stack"><div class="panel"><h3>Находки ИИ</h3>${findings}
-          <dl class="kv" style="margin-top:14px">${st.limitations?.length ? `<dt>Ограничения модели</dt><dd>${st.limitations.map(safe).join('<br>')}</dd>` : ''}<dt>Файлы</dt><dd>${info ? `${safe(info.instance_count)} ${plural(info.instance_count, ['файл', 'файла', 'файлов'])} · ${safe(info.series_count)} ${plural(info.series_count, ['серия', 'серии', 'серий'])}` : 'Не прочитаны'}</dd>${info ? `<dt>Протокол</dt><dd>${safe(info.protocol_name)} · ${safe(info.anatomy)}</dd>` : ''}<dt>Проверка DICOM</dt><dd>${info ? 'Пройдена' : 'Не пройдена'}</dd></dl></div>
-        ${right}</div></div>`;
-}
-
 /* ---------- Координатор: группа в «Обращениях» ---------- */
 export function manualStudiesBlock(){
   if (data.role !== state.role || data.page !== 'inbox') return '';
@@ -253,41 +155,6 @@ export function installImagingActions(actions){
     if (!$('#upConsent')?.checked) return toast('Отметьте согласие на передачу исследования врачу.');
     sendStudy(() => api('POST', `/api/demo/studies/${enc(d.name)}/submit`, {role:'patient', body:{consent:true}}), 'Учебное исследование отправлено врачу');
   };
-  actions.studyOpen = d => { state.sel.study = d.id; go('study'); };
-  actions.studyStep = d => { const n = data.detail?.images?.length || 0; if (!n) return; data.index = (Math.min(data.index, n - 1) + Number(d.step) + n) % n; render(); };
-  actions.studyCode = d => { data.code = d.code; render(); };
-  actions.studyConfirm = async d => {
-    const area = $('#studyDraft');
-    const text = area ? area.value : '';
-    if (!text.trim()) return toast('Заключение пустое. Напишите текст и подтвердите.');
-    if (data.busy) return;
-    data.drafts[d.code] = text;
-    data.busy = true; render();
-    try {
-      await api('POST', `/api/doctor/studies/${enc(d.id)}/confirm`, {role:'doctor', body:{conclusion:text, finding_code:d.code}});
-    } catch (err){
-      data.busy = false; render(); toast(err.message);  // текст врача остаётся в поле
-      return;
-    }
-    data.busy = false;
-    data.detailId = null;
-    toast('Заключение подтверждено');
-    await refreshImaging();
-  };
-  actions.studyRewrite = async d => {
-    const text = $('#studyDraft')?.value || '';
-    if (!text.trim()) return toast('Поле пустое. Напишите хотя бы несколько слов, и помощник предложит формулировку.');
-    if (data.suggesting) return;
-    data.drafts[d.code] = text;
-    data.suggesting = true; render();
-    try {
-      const r = await api('POST', `/api/doctor/studies/${enc(d.id)}/assistant/rewrite`, {role:'doctor', body:{finding_code:d.code, text}});
-      data.suggest = {code:d.code, text:r.suggestion};
-    } catch (err){ toast(err.message); }
-    data.suggesting = false; render();
-  };
-  actions.studySuggestUse = () => { if (!data.suggest) return; data.drafts[data.suggest.code] = data.suggest.text; data.suggest = null; render(); };
-  actions.studySuggestDrop = () => { data.suggest = null; render(); };
   actions.studyExplain = async d => {
     if (data.explain[d.id]?.status === 'loading') return;
     data.explain[d.id] = {status:'loading'}; render();
@@ -298,10 +165,3 @@ export function installImagingActions(actions){
     render();
   };
 }
-
-document.addEventListener('input', e => {
-  if (e.target.id !== 'studyDraft') return;
-  data.drafts[e.target.dataset.code] = e.target.value;
-  const count = $('#draftCount');
-  if (count) count.textContent = e.target.value.length;
-});

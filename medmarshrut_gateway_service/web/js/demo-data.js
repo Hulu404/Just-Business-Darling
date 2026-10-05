@@ -1,6 +1,5 @@
 import { notify, title } from './domain.js';
 import { icon } from './icons.js';
-import { doctor } from './pages/doctor.js';
 import { messages, pharmacy, result } from './pages/patient.js';
 import { services } from './pages/services.js';
 import { requests, rules, who } from './pages/staff.js';

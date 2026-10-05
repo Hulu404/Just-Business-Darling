@@ -1,6 +1,5 @@
 import { actor } from './actions.js';
 import { DEMO, MOD_LABEL, NEXT, RULES, SERVICES, partnerOnly, slotsFor } from './demo-data.js';
-import { doctor } from './pages/doctor.js';
 import { pharmacy } from './pages/patient.js';
 import { who } from './pages/staff.js';
 import { staffName, state, ui } from './state.js';

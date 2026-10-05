@@ -4,8 +4,8 @@ import { ACTIONS, PAGES } from './actions.js';
 import { render, renderBanner, renderShell } from './shell.js';
 import { freshState, health, hooks, sessions, setState, state, ui } from './state.js';
 import { installPathActions, isPathPage, pathAppointments, pathCase, pathHome, pathInbox, pathPlan, pathScheduling, refreshPath } from './path-ui.js';
-import { installPathExtra, pathAnalytics, pathDoctor, pathRules, refreshPathExtra } from './path-extra.js';
-import { imagingPage, installImagingActions, isImagingListPage, readingPage, refreshImaging, studyPage } from './imaging-ui.js';
+import { installPathExtra, pathAnalytics, pathRules, refreshPathExtra } from './path-extra.js';
+import { imagingPage, installImagingActions, isImagingListPage, refreshImaging } from './imaging-ui.js';
 import { analyticsClinicBlock, documentsReferrals, incomingPage, installClinicActions, isClinicPage, partnersPage, referralPage, refreshClinic } from './clinic-ui.js';
 import { documents } from './pages/patient.js';
 import { RESCAN_PAGES, RS_PAGES, installRescanActions, isRescanPage, refreshRescan, setRescanRender } from './rescan-ui.js';
@@ -15,8 +15,8 @@ const DEFAULT_PARTNER = 'clinic-partner-1';
 const HEALTH_EVERY = 15000;
 Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointments,
                       inbox:pathInbox, case:pathCase, scheduling:pathScheduling,
-                      doctor:pathDoctor, rules:pathRules, analytics:pathAnalytics,
-                      imaging:imagingPage, reading:readingPage, study:studyPage,
+                      rules:pathRules, analytics:pathAnalytics,
+                      imaging:imagingPage,
                       partners:partnersPage, incoming:incomingPage, referral:referralPage,
                       documents:() => documents() + documentsReferrals(),
                       analytics:() => pathAnalytics() + analyticsClinicBlock(), ...RESCAN_PAGES});
@@ -38,9 +38,10 @@ const sessionRequests = {};
 /* Окно клиники-партнёра хранит клинику в адресе: #/partner/incoming?clinic=clinic-partner-2 */
 function parseHash(){
   const m = /^#\/([a-z]+)\/([A-Za-z]+)(?:\?clinic=([a-z0-9-]+))?$/.exec(location.hash);
-  if (!m || !ROLES.includes(m[1]) || !Object.prototype.hasOwnProperty.call(PAGES, m[2])) return null;
+  if (!m || !ROLES.includes(m[1])) return null;
   /* У врача только кабинет rescan: прежние адреса (#/doctor/reading, #/doctor/inbox) открывают стартовый экран */
   const page = m[1] === 'doctor' && !RS_PAGES.includes(m[2]) ? 'rsToday' : m[2];
+  if (!Object.prototype.hasOwnProperty.call(PAGES, page)) return null;
   return m[1] === 'partner' ? {role:m[1], page, partnerClinic:m[3] || DEFAULT_PARTNER} : {role:m[1], page};
 }
 const hashOf = () => `#/${state.role}/${state.page}${state.role === 'partner' ? '?clinic=' + (state.partnerClinic || DEFAULT_PARTNER) : ''}`;

@@ -1,7 +1,6 @@
 import { PAGES } from './actions.js';
 import { awaitingOutcome, queueInfo, waitingOn } from './domain.js';
 import { icon } from './icons.js';
-import { doctor } from './pages/doctor.js';
 import { appointments, documents, home, intake, messages, pharmacy, plan, result, review } from './pages/patient.js';
 import { services } from './pages/services.js';
 import { isRescanPage, modebar } from './rescan-ui.js';
@@ -28,16 +27,11 @@ export function navCount(id){
     if (id === 'requests') return state.requests.filter(r => r.status === 'open' && waitingOn(r) === 'staff').length;
     if (id === 'pharmacyAdmin') return state.orders.filter(o => o.status === 'Собирается').length;
   }
-  if (state.role === 'doctor'){
-    if (id === 'reading') return state.readingCount || 0;
-    if (id === 'doctor') return state.doctorVisitCount || 0;
-    if (id === 'requests') return state.requests.filter(r => r.status === 'open' && waitingOn(r) === 'doctor').length;
-  }
   if (state.role === 'partner' && id === 'incoming') return state.partnerIncoming || 0;
   return 0;
 }
 export function pageTitle(){
-  const t = {home:'Главная', intake:'Новое обращение', review:'Проверка данных', result:'Ваш МедМаршрут', plan:'Мой план', imaging:'Что на снимке', appointments:'Записи', messages:'Сообщения', pharmacy:'Аптека', documents:'Документы', inbox:'Обращения', case:'Карточка обращения', scheduling:'Запись и сопровождение', requests:state.role === 'doctor' ? 'Связь с клиникой' : 'Связь с врачами', comms:'Связь с пациентами', partners:'Партнёры', pharmacyAdmin:'Аптека и заказы', rules:'Маршруты и правила', analytics:'Аналитика', reading:'Что на снимке', study:'Снимок и заключение', doctor:'Приёмы', services:'Карта сервисов', incoming:'Входящие направления', referral:'Входящее направление'};
+  const t = {home:'Главная', intake:'Новое обращение', review:'Проверка данных', result:'Ваш МедМаршрут', plan:'Мой план', imaging:'Что на снимке', appointments:'Записи', messages:'Сообщения', pharmacy:'Аптека', documents:'Документы', inbox:'Обращения', case:'Карточка обращения', scheduling:'Запись и сопровождение', requests:'Связь с врачами', comms:'Связь с пациентами', partners:'Партнёры', pharmacyAdmin:'Аптека и заказы', rules:'Маршруты и правила', analytics:'Аналитика', services:'Карта сервисов', incoming:'Входящие направления', referral:'Входящее направление'};
   return t[state.page] || 'МедМаршрут';
 }
 export function renderShell(){
@@ -51,7 +45,7 @@ export function renderShell(){
   }
   $('#topbar').className = 'topbar';
   const nav = NAVS[state.role] || NAVS.patient;
-  const parent = {case:'inbox', study:state.role === 'patient' ? 'imaging' : 'reading', referral:'incoming'}[state.page] || state.page;
+  const parent = {case:'inbox', referral:'incoming'}[state.page] || state.page;
   const item = ([id, ic, label]) => { const n = navCount(id); return `<button data-nav="${id}" class="${parent === id ? 'active' : ''}"><span class="icon">${icon(ic)}</span>${label}${n ? `<span class="count">${n}</span>` : ''}</button>`; };
   $('#sidebar').className = 'sidebar' + (ui.mobileOpen ? ' open' : '');
   $('#sidebar').innerHTML = `<div class="brand"><span class="brandmark">+</span><div>МедМаршрут<small>Демо-стенд</small></div></div>

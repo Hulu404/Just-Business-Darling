@@ -1,6 +1,6 @@
 import { DEMO, PHARMACIES, PRODUCTS, RX_STOCK, scenarios, slotsFor } from './demo-data.js';
 import { addLog, analyze, attendStep, bookStep, byKey, confirmRoute, createEpisodeFromStudy, currentStep, ep, live, mkRequest, myEpisodes, notify, offerStep, pushMsg, refKey, refuseStep, reopenStep, savePlan, slotLine, stepOf, studyOf, title, unbookStep } from './domain.js';
-import { doctor, planModal } from './pages/doctor.js';
+import { planModal } from './pages/doctor.js';
 import { REASONS, appointments, cartTotal, checkoutModal, createOwnEpisode, documents, home, intake, laterModal, messages, pharmacy, plan, result, review, slotAskModal, summaryText } from './pages/patient.js';
 import { services } from './pages/services.js';
 import { analytics, calcOut, casePage, comms, inbox, pharmacyAdmin, reqNewModal, requests, rules, sampleText, scheduling, slotListModal, who, writeModal } from './pages/staff.js';
@@ -12,7 +12,7 @@ import { $, $$, btn, closeModal, go, lc, modalHead, navBtn, openModal, plural, r
    Действия и события
    ===================================================================== */
 /* Экраны «Что на снимке», «Снимок и заключение» и «Черновики ИИ» добавляет main.js из imaging-ui.js */
-export const PAGES = {home, intake, review, result, plan, appointments, messages, pharmacy, documents, inbox, case:casePage, scheduling, requests, comms, pharmacyAdmin, rules, analytics, doctor, services};
+export const PAGES = {home, intake, review, result, plan, appointments, messages, pharmacy, documents, inbox, case:casePage, scheduling, requests, comms, pharmacyAdmin, rules, analytics, services};
 export let orderNo = 1040, reserveNo = 217;
 export const actor = () => state.role === 'patient' ? 'Пациент' : state.role === 'doctor' ? 'Врач' : staffName();
 export const clearIntake = () => { Object.assign(state, {symptoms:'', duration:'', redflag:false, doctor:'', wait:'', documentName:'', documentNotes:'', routeCreated:false}); state.episodes = state.episodes.filter(e => e.id !== 'own'); };

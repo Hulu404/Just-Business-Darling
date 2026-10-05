@@ -65,9 +65,9 @@ python .\medmarshrut_gateway_service\service.py
 | `GET /api/patient/studies` | пациент | свои исследования: до подтверждения только статус, после — заключение врача, объяснение, шаг плана, срез |
 | `GET /api/patient/studies/{id}/images/{sop_uid}.png` | пациент | срез своего исследования, только после подтверждения |
 | `GET /api/doctor/studies` | врач | реестр плюс `GET /v1/review/{id}` по каждой записи |
-| `GET /api/doctor/studies/{id}` | врач | срезы, признаки с местом, ограничения модели, сведения о файлах, заготовка заключения; у исследования в `awaiting_physician` — `preview` по каждому коду находки (шаги или причина ручного разбора и версия правил через `POST /v1/rules/dry-run`, плюс утверждённое объяснение или `null`). `confidence` в запрос не входит; сервис пути недоступен — `preview: null` |
+| `GET /api/doctor/studies/{id}` | врач | срезы, признаки с местом, ограничения модели, сведения о файлах, заготовка заключения; у исследования в `awaiting_physician` — `preview` по каждому коду находки (шаги или причина ручного разбора — код `manual_reason` и текст `manual_reason_text` — и версия правил через `POST /v1/rules/dry-run`, плюс утверждённое объяснение или `null`). `confidence` в запрос не входит; сервис пути недоступен — `preview: null` |
 | `GET /api/doctor/studies/{id}/images/{sop_uid}.png` | врач | срез в PNG |
-| `POST /api/doctor/studies/{id}/confirm` | врач | `{"conclusion", "finding_code"?}` → `POST /v1/review/{id}`; итог: эпизод и первый шаг или причина |
+| `POST /api/doctor/studies/{id}/confirm` | врач | `{"conclusion", "finding_code"?}` → `POST /v1/review/{id}`; итог `next`: эпизод, первый шаг и его статус `step_status` или причина |
 | `GET /api/doctor/visits` | врач | визиты по шагам `confirmed`/`attended`; у визита `appointment` — специалист, место и формат из `appointments` и `slots`, или `null` для записи у партнёра |
 | `GET /api/staff/studies/manual` | сотрудник, врач | «Снимки на ручном описании» и подтверждения, не дошедшие до сервиса маршрута; без причины и вывода модели |
 | `GET /api/staff/patients?limit=&status=` | сотрудник, врач | `GET /v1/patients` с токеном своей клиники; `limit` — целое от 1 до 500, проверяется до вызова |
@@ -111,8 +111,8 @@ python .\medmarshrut_gateway_service\service.py
 
 ## Защита
 
-- Слушает только `127.0.0.1`; `Host` должен быть `127.0.0.1:<порт>` или `localhost:<порт>`.
-- `POST`, `PUT`, `PATCH`, `DELETE` — только с `Origin` шлюза или без него, с `X-MM-Role` и `Content-Type: application/json`.
+- Слушает `127.0.0.1` (адрес задаёт `GATEWAY_BIND`, на Railway — `0.0.0.0`); `Host` должен быть `127.0.0.1:<порт>`, `localhost:<порт>` или домен из `GATEWAY_PUBLIC_HOSTS` (список через запятую, `https://` и `/` в конце отбрасываются).
+- `POST`, `PUT`, `PATCH`, `DELETE` — только с `Origin` шлюза (для публичного домена — `https://<домен>`) или без него, с `X-MM-Role` и `Content-Type: application/json`.
 - На каждом ответе `X-Content-Type-Options: nosniff` и `Referrer-Policy: no-referrer`, на ответах API `Cache-Control: no-store`, на HTML — строгий `Content-Security-Policy` (скрипты только из файлов).
 - Статика — только из `web/`, по списку расширений, без выхода за пределы папки. В списке есть `.webp` (картинки) и `.otf` (шрифт кабинета врача); CSP разрешает `font-src 'self'`.
 - `GET /api/health` отдаёт `brand_font`: лежит ли на диске `web/fonts/Stolzl-Regular.otf`. Шрифт в git не входит (коммерческий), поэтому приложение запрашивает его только при `brand_font: true`.
@@ -147,12 +147,19 @@ python .\medmarshrut_gateway_service\service.py
 | `ui.js` | `safe`, `badge`, `btn`, модальное окно, уведомление, `go`; общие состояния `loadingCards`, `errorNote`, `serviceBanner` |
 | `domain.js` | доменные функции: эпизод, шаги, заключение, очередь |
 | `shell.js` | меню, шапка, отрисовка, полоса недоступного сервиса |
-| `pages/*.js` | экраны пациента, сотрудника, врача и «Карта сервисов» |
+| `pages/*.js` | экраны пациента и сотрудника из прототипа, «Карта сервисов», форма плана прежнего каркаса |
+| `path-ui.js`, `path-extra.js` | экраны пациента и координатора на сервисе пути; правила и аналитика координатора |
+| `imaging-ui.js` | «Что на снимке» пациента, загрузка архива, «Снимки на ручном описании» у координатора |
+| `clinic-ui.js` | карточка обращения, партнёры, документы, окно клиники-партнёра |
+| `rescan-ui.js` | кабинет врача rescan: логотип, шапка, рельса, загрузчики данных, «Настройки», колокольчик |
+| `rescan-today.js`, `rescan-studies.js`, `rescan-patients.js`, `rescan-visits.js`, `rescan-plan.js` | разделы кабинета «Сегодня», «Исследования», «Пациенты», «Приёмы» и общая форма плана врача |
 | `actions.js` | действия и обработчики событий (делегирование по `data-*`) |
 | `api.js` | обёртка над `fetch`: `X-MM-Role`, JSON, ошибки шлюза, новая сессия при 401 |
 | `main.js` | запуск: адрес ↔ роль и экран, сессия роли, опрос `/api/health` |
 
-Роль и экран окна живут в адресе: `#/patient/plan`, `#/staff/case`, `#/doctor/reading`. Данные демо-разделов пока в памяти вкладки, как в прототипе; на сервисы экраны переходят в заданиях 04–07. Любое значение из данных попадает в разметку через `safe()`.
+Роль и экран окна живут в адресе: `#/patient/plan`, `#/staff/case`, `#/doctor/rsStudies`. Данные демо-разделов пока в памяти вкладки, как в прототипе; на сервисы экраны переходят в заданиях 04–07. Любое значение из данных попадает в разметку через `safe()`.
+
+**Кабинет врача rescan (задание 12).** У врача пять экранов: `rsToday`, `rsStudies`, `rsPatients`, `rsVisits`, `rsSettings`. Прежние адреса врача (`#/doctor/reading`, `#/doctor/inbox` и другие) открывают `rsToday`. Стили — `rescan.css`, все под `#clinic` и префиксом `c-`, поэтому экраны координатора и партнёра не меняются. Картинки органов и форм препаратов — `web/img/rescan/*.webp`. Шрифт Stolzl (`web/fonts/Stolzl-Regular.otf`) коммерческий и в git не входит: его раскладывает `prototype/rescan_extract.py` из образца `prototype/rescan-app-standalone.html`, который тоже хранится только локально. Без файла кабинет показывается системным шрифтом. Списки перечитываются раз в 15 секунд; открытое исследование и открытые формы по таймеру не перерисовываются.
 
 Проверки в браузере — `demo_stand/web_check.py`, запуск `python start.py --web-check`.
 

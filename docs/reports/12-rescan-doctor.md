@@ -71,7 +71,13 @@
   - Отступление: прежние функции врача (`readingPage`, `studyPage`, `pathDoctor`, ветки `doctor` в `navCount`/`pageTitle`/действиях) пока в коде — они недостижимы для врача после нормализации адреса; удаление мёртвого кода — цикл 10 (Ревизия).
   - `web_check.py`: из `SCREENS` убраны прежние экраны врача (`reading`, `study`, `doctor`, `requests`, `inbox`) и `doctor/services` — за ними `COMPARE` сократился с 8 до 7 экранов; переход «Глазами врача» проверяется на `doctor:rsStudies`; добавлена проверка, что прежние адреса врача открывают кабинет. `check_imaging` убран вместе с экранами `reading`/`study`; его уникальные проверки окна загрузки пациента (рентген в списке, демо-набор) перенесены в `check_rescan_imaging`.
   - Проверка (полная): быстрая — image 20, path 12, clinic 8, medications 10, gateway 97 OK (skipped=6, PostgreSQL); smoke 22/22; web-check 10/10 (было 11: `check_imaging` убран, добавлены проверки редиректа и перехода «Глазами врача»), сравнение 7 экранов, макс. 0.004%. С первого раза.
-- [ ] Цикл 10. Ревизия
+- [~] Цикл 10. Ревизия — 2026-10-05, закоммичено по просьбе владельца до зелёной проверки в браузере
+  - `safe()`: подстановки в `rescan-*.js` проверены, значения с сервера экранируются (часть — снаружи, через `safe(b)`). Тексты из списка «не переноси» и `localStorage`/`sessionStorage` в `web/` не найдены. Три состояния у пяти экранов есть (`stateOf`, ветки `health` у «Настроек»).
+  - Удалён код врача без вызовов: `pathDoctor` и его форма с действиями `pathOutcomeOpen`/`pathPlanOpen`/`pathReviseOpen`/`pathDoctorSave` (`path-extra.js`), `readingPage`, `studyPage` и действия `study*` кроме `studyExplain` (`imaging-ui.js`), `doctor()` (`pages/doctor.js`, `planModal` остался), ветки врача в `navCount`, `pageTitle`, `staffActions`, `isPathPage`; неиспользуемые импорты `doctor` в `domain.js`, `icons.js`, `demo-data.js`. Ветки `role === 'doctor'` в прототипных `pages/staff.js` и `actions.js` оставлены: врач до них не доходит, но удаление затрагивает экраны координатора.
+  - `main.js`: `parseHash` нормализует адрес врача до проверки по `PAGES` (иначе `#/doctor/reading` после удаления `reading` не распознавался).
+  - README шлюза: `manual_reason_text`, `step_status`, `GATEWAY_PUBLIC_HOSTS`, модули и раздел о кабинете rescan.
+  - Проверка: быстрая — image 20, path 12, clinic 8, medications 10, gateway 98 OK (skipped=6, PostgreSQL). Отдельный обход всех экранов из `SCREENS` и прежних адресов врача на стенде: всё открывается, консоль чистая; `check_screens`, `check_widths`, `check_scenario`, `check_two_windows` по отдельности проходят.
+  - осталось: `python start.py --web-check` три раза подряд прерван тайм-аутом 8 с в `check_screens` (`#/staff/case` догружается примерно за 9 с). На стенде вне проверки `/api/staff/episodes` отвечает за 0,5 с. Вероятная причина — задержка общей базы Supabase (её теперь использует и деплой на Railway); не доказано. Допуски не поднимались.
 - [ ] Финал
 
 ## Примечания окружения

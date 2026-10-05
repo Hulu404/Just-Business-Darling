@@ -1,4 +1,3 @@
-import { doctor } from './pages/doctor.js';
 import { home, pharmacy } from './pages/patient.js';
 import { inbox } from './pages/staff.js';
 
