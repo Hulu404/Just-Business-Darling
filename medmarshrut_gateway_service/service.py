@@ -117,7 +117,10 @@ def load_config(env: dict[str, str]) -> Config:
     except ValueError:
         med_staff_raw = {}
     med_staff_tokens = dict(med_staff_raw) if isinstance(med_staff_raw, dict) else {}
-    public_hosts = tuple(h.strip().lower() for h in (env.get("GATEWAY_PUBLIC_HOSTS") or "").split(",") if h.strip())
+    # "https://www.example.org/" pasted from the address bar means the same domain.
+    public_hosts = tuple(dict.fromkeys(
+        re.sub(r"^https?://", "", h.strip().lower()).rstrip("/")
+        for h in (env.get("GATEWAY_PUBLIC_HOSTS") or "").split(",") if h.strip()))
     if not all(re.fullmatch(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+", h) for h in public_hosts):
         raise ConfigError("GATEWAY_PUBLIC_HOSTS must be comma-separated domain names without scheme or port")
     return Config(values["REVIEWER_TOKEN"], values["PATH_ADMIN_TOKEN"], secret("PATH_MIS_TOKEN", required=False),

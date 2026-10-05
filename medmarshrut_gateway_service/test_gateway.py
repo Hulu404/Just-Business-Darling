@@ -486,9 +486,10 @@ class ConfigTests(unittest.TestCase):
 
     def test_public_hosts(self):
         self.assertEqual(load_config(self.base()).public_hosts, ())
-        config = load_config({**self.base(), "GATEWAY_PUBLIC_HOSTS": " WWW.Demo.example.org, x.up.railway.app "})
+        config = load_config({**self.base(),
+                              "GATEWAY_PUBLIC_HOSTS": " WWW.Demo.example.org, x.up.railway.app ,https://x.up.railway.app/"})
         self.assertEqual(config.public_hosts, ("www.demo.example.org", "x.up.railway.app"))
-        for bad in ("https://demo.example.org", "demo.example.org:443", "localhost", "demo.example.org/path"):
+        for bad in ("ftp://demo.example.org", "demo.example.org:443", "localhost", "demo.example.org/path"):
             with self.assertRaisesRegex(ConfigError, "GATEWAY_PUBLIC_HOSTS"):
                 load_config({**self.base(), "GATEWAY_PUBLIC_HOSTS": bad})
 

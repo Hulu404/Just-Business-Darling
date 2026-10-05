@@ -31,6 +31,15 @@ SECRET_NAMES = ("PATH_SHARED_SECRET", "PATH_ADMIN_TOKEN", "PATH_PATIENT_TOKEN", 
 PUBLIC_PORT = int(os.environ.get("PORT") or 8763)
 PUBLIC_BIND = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
 
+
+def public_hosts() -> str:
+    """Domains the gateway answers besides localhost: GATEWAY_PUBLIC_HOSTS, and on Railway its own domain and healthcheck."""
+    names = (os.environ.get("GATEWAY_PUBLIC_HOSTS") or "").split(",")
+    if os.environ.get("PORT"):
+        names += [os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "", "healthcheck.railway.app"]
+    return ",".join(dict.fromkeys(name.strip() for name in names if name.strip()))
+
+
 SERVICES = [
     {"name": "path", "title": "сервис пути", "port": 8765,
      "script": {"demo": "medmarshrut_path_service/service.py", "real": "medmarshrut_path_service/service.py"},
@@ -69,6 +78,7 @@ SERVICES = [
                                     "CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"],
                                     "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "GATEWAY_HOME_CLINIC": "clinic-central",
                                     "GATEWAY_PORT": str(PUBLIC_PORT), "GATEWAY_BIND": PUBLIC_BIND,
+                                    "GATEWAY_PUBLIC_HOSTS": public_hosts(),
                                     "GATEWAY_STATE_DIR": str(state), "GATEWAY_PEOPLE": str(DEMO / "people.demo.json"),
                                     "GATEWAY_IMAGING_MODE": imaging_mode(mode),
                                     "MED_SHARED_SECRET": s["MED_SHARED_SECRET"],
@@ -83,7 +93,7 @@ STRIPPED_ENV = {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB", "PA
                 "DEMO_STUDY_INDEX", "PATH_MIS_TOKEN", "CLINIC_MIS_TOKEN", "IMAGE_URL", "PATH_URL", "CLINIC_URL",
                 "MED_DB", "MED_CATALOG", "MED_INVENTORY", "MED_URL",
                 "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT",
-                "GATEWAY_BIND", "PORT",
+                "GATEWAY_BIND", "GATEWAY_PUBLIC_HOSTS", "PORT",
                 "GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA", "GATEWAY_SUPABASE_PROJECT_REF"}
 # The assistant's API key goes to the gateway only (task 11): never to the three services, seed or checks.
 ASSISTANT_ENV = ("ANTHROPIC_API_KEY", "GATEWAY_ASSISTANT_MODEL")
