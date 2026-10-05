@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -73,6 +74,7 @@ class Config:
     conclusions_path: Path | None = None
     assistant_key: str = field(default="", repr=False)  # ANTHROPIC_API_KEY: only in this process
     assistant_model: str = ""
+    public_hosts: tuple[str, ...] = ()  # GATEWAY_PUBLIC_HOSTS: HTTPS domains of a deployed stand
 
 
 def load_config(env: dict[str, str]) -> Config:
@@ -115,6 +117,9 @@ def load_config(env: dict[str, str]) -> Config:
     except ValueError:
         med_staff_raw = {}
     med_staff_tokens = dict(med_staff_raw) if isinstance(med_staff_raw, dict) else {}
+    public_hosts = tuple(h.strip().lower() for h in (env.get("GATEWAY_PUBLIC_HOSTS") or "").split(",") if h.strip())
+    if not all(re.fullmatch(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+", h) for h in public_hosts):
+        raise ConfigError("GATEWAY_PUBLIC_HOSTS must be comma-separated domain names without scheme or port")
     return Config(values["REVIEWER_TOKEN"], values["PATH_ADMIN_TOKEN"], secret("PATH_MIS_TOKEN", required=False),
                   values["CLINIC_SHARED_SECRET"], clinic_tokens, home, Path(env["GATEWAY_STATE_DIR"]),
                   Path(env.get("GATEWAY_PEOPLE") or REPO / "demo_stand" / "people.demo.json"), mode, urls, port,
@@ -122,7 +127,7 @@ def load_config(env: dict[str, str]) -> Config:
                   env.get("MED_PATIENT_TOKEN", ""), med_staff_tokens,
                   env.get("GATEWAY_DATABASE_URL", ""), env.get("GATEWAY_DB_SCHEMA", ""),
                   Path(env.get("GATEWAY_CONCLUSIONS") or REPO / "demo_stand" / "conclusions.demo.json"),
-                  env.get("ANTHROPIC_API_KEY", ""), env.get("GATEWAY_ASSISTANT_MODEL", ""))
+                  env.get("ANTHROPIC_API_KEY", ""), env.get("GATEWAY_ASSISTANT_MODEL", ""), public_hosts)
 
 @dataclass(frozen=True)
 class RawResponse:
@@ -150,6 +155,7 @@ class Gateway:
     def __init__(self, config: Config, *, timeout: float | None = None, store: GatewayStore | None = None):
         self.config = config
         self.port = config.port
+        self.public_hosts = config.public_hosts
         self.people = People(config.people_path)
         self.sessions = SessionStore()
         self.store = store
@@ -323,7 +329,12 @@ class Gateway:
         }
 
     def allowed_hosts(self) -> set[str]:
-        return {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
+        # A deployed stand sits behind the platform's HTTPS proxy: Host comes without a port there.
+        return {f"127.0.0.1:{self.port}", f"localhost:{self.port}", *self.public_hosts}
+
+    def allowed_origins(self) -> set[str]:
+        return ({f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"}
+                | {"https://" + h for h in self.public_hosts})
 
     def match(self, method: str, path: str) -> tuple[tuple[str, str], dict[str, str]] | None:
         """The most specific route wins: a literal segment beats a {parameter} (…/steps/{step}/referral)."""
@@ -1684,7 +1695,7 @@ def make_handler(gateway: Gateway):
                 raw_length = 0
                 if method in MUTATING:
                     origin = self.headers.get("Origin")
-                    if origin is not None and origin not in {"http://" + h for h in gateway.allowed_hosts()}:
+                    if origin is not None and origin not in gateway.allowed_origins():
                         raise GatewayError(403, "forbidden_origin", "Запрос пришёл с чужой страницы и отклонён.")
                     if not role:
                         raise GatewayError(401, "no_session", "Окно не знает своей роли. Обновите страницу и выберите роль.")

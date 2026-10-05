@@ -26,6 +26,7 @@
    | `GATEWAY_DATABASE_URL` | `.env` (Supabase, с `sslmode=require`) | да |
    | `GATEWAY_DB_SCHEMA` | `.env`; для демо лучше отдельное имя, например `gateway_railway` | да |
    | `GATEWAY_SUPABASE_PROJECT_REF` | `.env` (ref проекта Supabase) | да |
+   | `GATEWAY_PUBLIC_HOSTS` | домены сервиса через запятую, без `https://` и порта: `www.rescan-clinic.tech,<имя>.up.railway.app,healthcheck.railway.app` | да |
    | `ANTHROPIC_API_KEY` | ваш ключ Claude | нет — только если нужен ИИ-помощник |
    | `GATEWAY_ASSISTANT_MODEL` | напр. `claude-sonnet-5-5` | нет |
 
@@ -42,6 +43,7 @@
 Локальный запуск при этом не изменился: правки включаются только когда Railway задаёт `$PORT`.
 
 - `medmarshrut_gateway_service/service.py` — адрес привязки шлюза берётся из `GATEWAY_BIND` (по умолчанию `127.0.0.1`; на Railway `0.0.0.0`).
+- `medmarshrut_gateway_service/service.py` — шлюз пускает только запросы на `127.0.0.1` и `localhost` (защита от DNS rebinding). Домены деплоя добавляются переменной `GATEWAY_PUBLIC_HOSTS`, для них же разрешён `Origin` `https://<домен>` (+1 тест конфигурации, +проверки в `test_host_origin_role_type_and_size`).
 - `start.py` — если задан `$PORT`, шлюз запускается на нём и на `0.0.0.0` (`PUBLIC_PORT`/`PUBLIC_BIND`); четыре внутренних сервиса всегда на `127.0.0.1`.
 
 ## Ограничения демо
@@ -55,5 +57,6 @@
 ## Если не поднимается
 
 - **Healthcheck не проходит.** Посмотрите логи деплоя: обычно это неверный `GATEWAY_DATABASE_URL` (нужен `sslmode=require`) или несовпадение `GATEWAY_SUPABASE_PROJECT_REF` со строкой подключения.
+- **`forbidden_host` «Откройте приложение по адресу 127.0.0.1 или localhost»** — домена, по которому открыли сайт, нет в `GATEWAY_PUBLIC_HOSTS`. Добавьте его и передеплойте.
 - **Ошибка версии Python** при сборке numpy/pydicom — задайте переменную `NIXPACKS_PYTHON_VERSION=3.12`.
 - **«Порт занят»** в логах локально, но не на Railway: это проверка стенда; на чистом контейнере портов хватает.

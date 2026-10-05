@@ -263,6 +263,15 @@ class AccessTests(GatewayTestCase):
         self.assertEqual(self.call("POST", "/api/session", role="staff", body={"role": "staff"},
                                    headers={"Origin": f"http://localhost:{self.port}"})[0], 201)
         self.assertEqual(self.call("POST", "/api/session", body={"role": "staff"})[0], 401)
+        self.assertEqual(self.call("GET", "/api/health", host="demo.example.org")[0], 403)
+        self.gateway.public_hosts = ("demo.example.org",)
+        self.assertEqual(self.call("GET", "/api/health", host="demo.example.org")[0], 200)
+        self.assertEqual(self.call("POST", "/api/session", role="staff", body={"role": "staff"}, host="demo.example.org",
+                                   headers={"Origin": "https://demo.example.org"})[0], 201)
+        status, _, body = self.call("POST", "/api/session", role="staff", body={"role": "staff"},
+                                    host="demo.example.org", headers={"Origin": "http://demo.example.org"})
+        self.assertEqual((status, body["error"]["code"]), (403, "forbidden_origin"))
+        self.assertEqual(self.call("GET", "/api/health", host="evil.example:80")[0], 403)
         self.assertEqual(self.call("POST", "/api/session", role="staff", raw=b"role=staff",
                                    headers={"Content-Type": "application/x-www-form-urlencoded"})[0], 415)
         self.assertEqual(self.call("POST", "/api/session", role="staff", raw=b"",
@@ -474,6 +483,14 @@ class ConfigTests(unittest.TestCase):
             load_config({**self.base(), "GATEWAY_IMAGING_MODE": "magic"})
         with self.assertRaisesRegex(ConfigError, "GATEWAY_STATE_DIR"):
             load_config({k: v for k, v in self.base().items() if k != "GATEWAY_STATE_DIR"})
+
+    def test_public_hosts(self):
+        self.assertEqual(load_config(self.base()).public_hosts, ())
+        config = load_config({**self.base(), "GATEWAY_PUBLIC_HOSTS": " WWW.Demo.example.org, x.up.railway.app "})
+        self.assertEqual(config.public_hosts, ("www.demo.example.org", "x.up.railway.app"))
+        for bad in ("https://demo.example.org", "demo.example.org:443", "localhost", "demo.example.org/path"):
+            with self.assertRaisesRegex(ConfigError, "GATEWAY_PUBLIC_HOSTS"):
+                load_config({**self.base(), "GATEWAY_PUBLIC_HOSTS": bad})
 
 
 if __name__ == "__main__":
