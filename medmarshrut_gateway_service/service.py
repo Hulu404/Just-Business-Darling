@@ -19,6 +19,7 @@ from catalog import STUDY_NAMES
 from errors import GatewayError
 from imaging import (MAX_ARCHIVE, MAX_CONCLUSION, MODALITY_TYPES, TASKS, build_manifest, confirm_body,
                      conclusion_templates, dicom_to_png, images, is_demo, place, reason_text as study_reason)
+from pharmacy import PHARMACY_LABELS, PharmacyModule
 from sessions import ROLES, People, Session, SessionStore, cookie_name
 from store import GatewayStore, StoreConflict, StoreError
 from upstream import Upstream, human_error, patient_ref, service_url, text
@@ -56,13 +57,17 @@ class Config:
     path_admin_token: str
     path_mis_token: str
     clinic_secret: str
-    clinic_tokens: dict[str, str]  # clinic_id -> staff token
+    clinic_tokens: dict[str, str]
     home_clinic: str
     state_dir: Path
     people_path: Path
     imaging_mode: str
     urls: dict[str, str]
     port: int
+    med_secret: str = ""
+    med_admin_token: str = ""
+    med_patient_token: str = ""
+    med_staff_tokens: dict[str, str] = field(default_factory=dict)
     db_dsn: str = ""
     db_schema: str = ""
     conclusions_path: Path | None = None
@@ -96,20 +101,28 @@ def load_config(env: dict[str, str]) -> Config:
     mode = env.get("GATEWAY_IMAGING_MODE") or "no-model"
     if mode not in IMAGING_MODES:
         raise ConfigError(f"GATEWAY_IMAGING_MODE must be one of {sorted(IMAGING_MODES)}")
+    
     try:
-        urls = {service: service_url(env.get(f"{service.upper()}_URL"), service) for service in ("image", "path", "clinic")}
+        urls = {service: service_url(env.get(f"{service.upper()}_URL"), service)
+                for service in ("image", "path", "clinic", "medications")}
         port = int(env.get("GATEWAY_PORT") or 8763)
     except ValueError as exc:
         raise ConfigError(str(exc) if "_URL" in str(exc) else "GATEWAY_PORT must be a port number") from None
     if not 0 <= port <= 65535:
         raise ConfigError("GATEWAY_PORT must be a port number")
+    try:
+        med_staff_raw = json.loads(env.get("MED_STAFF_TOKENS", "{}") or "{}")
+    except ValueError:
+        med_staff_raw = {}
+    med_staff_tokens = dict(med_staff_raw) if isinstance(med_staff_raw, dict) else {}
     return Config(values["REVIEWER_TOKEN"], values["PATH_ADMIN_TOKEN"], secret("PATH_MIS_TOKEN", required=False),
                   values["CLINIC_SHARED_SECRET"], clinic_tokens, home, Path(env["GATEWAY_STATE_DIR"]),
                   Path(env.get("GATEWAY_PEOPLE") or REPO / "demo_stand" / "people.demo.json"), mode, urls, port,
+                  env.get("MED_SHARED_SECRET", ""), env.get("MED_ADMIN_TOKEN", ""),
+                  env.get("MED_PATIENT_TOKEN", ""), med_staff_tokens,
                   env.get("GATEWAY_DATABASE_URL", ""), env.get("GATEWAY_DB_SCHEMA", ""),
                   Path(env.get("GATEWAY_CONCLUSIONS") or REPO / "demo_stand" / "conclusions.demo.json"),
                   env.get("ANTHROPIC_API_KEY", ""), env.get("GATEWAY_ASSISTANT_MODEL", ""))
-
 
 @dataclass(frozen=True)
 class RawResponse:
@@ -147,8 +160,12 @@ class Gateway:
         kwargs = {"timeout": timeout} if timeout else {}
         self.upstream = Upstream(config.urls, reviewer_token=config.reviewer_token,
                                  path_admin_token=config.path_admin_token, path_mis_token=config.path_mis_token,
-                                 clinic_secret=config.clinic_secret, clinic_tokens=config.clinic_tokens, **kwargs)
+                                 clinic_secret=config.clinic_secret, clinic_tokens=config.clinic_tokens,
+                                 med_secret=config.med_secret, med_admin_token=config.med_admin_token,
+                                 med_patient_token=config.med_patient_token, med_staff_tokens=config.med_staff_tokens,
+                                 **kwargs)
         self.assistant = Assistant.from_key(config.assistant_key, config.assistant_model)
+        self.pharmacy = PharmacyModule(self.upstream, config)
         # Route -> handler. A route works only with a row in `access` (or in `public`): default is deny.
         self.routes: dict[tuple[str, str], Handler] = {
             ("GET", "/api/health"): self.health,
@@ -201,6 +218,32 @@ class Gateway:
             ("GET", "/api/assistant/status"): self.assistant_status,
             ("POST", "/api/doctor/studies/{id}/assistant/rewrite"): self.doctor_rewrite,
             ("POST", "/api/patient/studies/{id}/assistant/explain"): self.patient_explain,
+             # ---- Медикаменты ----
+            ("GET", "/api/patient/offers"): self.pharmacy.patient_offers,
+            ("GET", "/api/patient/prescriptions/{id}/offers"): self.pharmacy.patient_prescription_offers,
+            ("GET", "/api/patient/orders"): self.pharmacy.patient_orders,
+            ("GET", "/api/patient/orders/{id}"): self.pharmacy.patient_order,
+            ("POST", "/api/patient/orders"): self.pharmacy.patient_order_place,
+            ("POST", "/api/patient/orders/{id}/cancel"): self.pharmacy.patient_order_cancel,
+            ("POST", "/api/doctor/prescriptions"): self.pharmacy.doctor_prescription_create,
+            ("GET", "/api/pharmacy/queue"): self.pharmacy.pharmacy_queue,
+            ("GET", "/api/pharmacy/metrics"): self.pharmacy.pharmacy_metrics,
+            ("GET", "/api/pharmacy/catalog"): self.pharmacy.pharmacy_catalog,
+            ("POST", "/api/pharmacy/orders/{id}/{action}"): self.pharmacy.pharmacy_order_action,
+            # ---- Rescan: врач ----
+            ("GET", "/api/doctor/dashboard"): self.doctor_dashboard,
+            ("GET", "/api/doctor/studies/{id}/plan-preview"): self.doctor_plan_preview,
+            ("POST", "/api/doctor/studies/{id}/skip-step"): self.doctor_skip_step,
+            ("GET", "/api/doctor/appointments"): self.doctor_appointments,
+            ("GET", "/api/doctor/integrations"): self.doctor_integrations,
+            # ---- Rescan: пациент ----
+            ("GET", "/api/patient/settings"): self.patient_settings_get,
+            ("POST", "/api/patient/settings"): self.patient_settings_post,
+            ("GET", "/api/patient/self-medications"): self.patient_self_meds_get,
+            ("POST", "/api/patient/self-medications"): self.patient_self_meds_post,
+            ("POST", "/api/patient/self-medications/{id}/remove"): self.patient_self_meds_remove,
+            ("GET", "/api/patient/calendar"): self.patient_calendar,
+            ("GET", "/api/patient/payment-methods"): self.patient_payment_methods,
         }
         # Routes whose body is a ZIP archive, not JSON: type and Content-Length are checked before reading.
         self.raw_routes: set[tuple[str, str]] = {("POST", "/api/patient/studies"), ("POST", "/api/staff/studies")}
@@ -254,6 +297,29 @@ class Gateway:
             ("GET", "/api/assistant/status"): set(ROLES),
             ("POST", "/api/doctor/studies/{id}/assistant/rewrite"): {"doctor"},
             ("POST", "/api/patient/studies/{id}/assistant/explain"): {"patient"},
+             ("GET", "/api/patient/offers"): {"patient"},
+            ("GET", "/api/patient/prescriptions/{id}/offers"): {"patient"},
+            ("GET", "/api/patient/orders"): {"patient"},
+            ("GET", "/api/patient/orders/{id}"): {"patient"},
+            ("POST", "/api/patient/orders"): {"patient"},
+            ("POST", "/api/patient/orders/{id}/cancel"): {"patient"},
+            ("POST", "/api/doctor/prescriptions"): {"doctor"},
+            ("GET", "/api/pharmacy/queue"): {"pharmacy"},
+            ("GET", "/api/pharmacy/metrics"): {"pharmacy"},
+            ("GET", "/api/pharmacy/catalog"): {"pharmacy"},
+            ("POST", "/api/pharmacy/orders/{id}/{action}"): {"pharmacy"},
+            ("GET", "/api/doctor/dashboard"): {"doctor"},
+            ("GET", "/api/doctor/studies/{id}/plan-preview"): {"doctor"},
+            ("POST", "/api/doctor/studies/{id}/skip-step"): {"doctor"},
+            ("GET", "/api/doctor/appointments"): {"doctor", "staff"},
+            ("GET", "/api/doctor/integrations"): {"doctor", "staff"},
+            ("GET", "/api/patient/settings"): {"patient"},
+            ("POST", "/api/patient/settings"): {"patient"},
+            ("GET", "/api/patient/self-medications"): {"patient"},
+            ("POST", "/api/patient/self-medications"): {"patient"},
+            ("POST", "/api/patient/self-medications/{id}/remove"): {"patient"},
+            ("GET", "/api/patient/calendar"): {"patient"},
+            ("GET", "/api/patient/payment-methods"): {"patient"},
         }
 
     def allowed_hosts(self) -> set[str]:
@@ -283,7 +349,9 @@ class Gateway:
     def health(self, ctx: Context) -> tuple[int, dict]:
         return 200, {"gateway": "ok", "auth": "demo-roles", "imaging_mode": self.config.imaging_mode,
                      "services": self.upstream.health_all(), "partner_clinics": self._partner_clinics(),
-                     "assistant": self.assistant.enabled, "brand_font": BRAND_FONT.is_file()}
+                     "assistant": self.assistant.enabled, "brand_font": BRAND_FONT.is_file(),
+                     "pharmacies": [{"pharmacy_id": pid, "name": PHARMACY_LABELS[pid]}
+                                    for pid in sorted(self.upstream.medications_with_staff())]}
 
     def _partner_clinics(self) -> list[dict]:
         """Partner clinics a window can open: a staff token, a demo person, a name from the clinic network."""
@@ -303,7 +371,10 @@ class Gateway:
             raise GatewayError(400, "invalid_input", "Выберите роль: пациент, сотрудник, врач или партнёр.")
         if role != ctx.role:
             raise GatewayError(400, "invalid_input", "Роль в запросе не совпадает с ролью окна. Обновите страницу.")
-        allowed = {"role", "patient_ref"} if role == "patient" else {"role", "clinic_id"} if role == "partner" else {"role"}
+        allowed = ({"role", "patient_ref"} if role == "patient"
+                   else {"role", "clinic_id"} if role == "partner"
+                   else {"role", "pharmacy_id"} if role == "pharmacy"
+                   else {"role"})
         if set(body) - allowed:
             raise GatewayError(400, "invalid_input", f"Лишние поля для роли: {', '.join(sorted(set(body) - allowed))}.")
         home = self.config.home_clinic
@@ -324,6 +395,12 @@ class Gateway:
             if clinic == home or clinic not in self.upstream.clinics_with_staff() or person is None:
                 raise GatewayError(400, "unknown_clinic", "Такой клиники-партнёра на стенде нет. Выберите другую.")
             session = self.sessions.create(role, person_id=person["id"], name=person["name"], clinic_id=clinic)
+        elif role == "pharmacy":
+            pharmacy = text(body.get("pharmacy_id", "pharm-central"), "pharmacy_id", 128)
+            if pharmacy not in PHARMACY_LABELS:
+                raise GatewayError(400, "unknown_clinic", "Такой аптеки на стенде нет.")
+            session = self.sessions.create(role, person_id=f"pharmacy-{pharmacy}",
+                                           name=PHARMACY_LABELS[pharmacy], clinic_id=pharmacy)
         else:
             person = self.people.person(self.people.roles[role])
             session = self.sessions.create(role, person_id=person["id"], name=person["name"], clinic_id=home)
@@ -363,8 +440,10 @@ class Gateway:
         return self.data_store().explanation(self.config.home_clinic, code) if code else None
 
     def catalog(self, ctx: Context) -> tuple[int, dict]:
-        return 200, self.data_store().catalogue(self.config.home_clinic)
-
+        base = self.data_store().catalogue(self.config.home_clinic)
+        base["specialists"] = self.data_store().specialists(self.config.home_clinic)
+        return 200, base
+    
     def slots(self, ctx: Context) -> tuple[int, dict]:
         episode_id, step_id = ctx.query.get("episode"), ctx.query.get("step")
         if not episode_id or not step_id:
@@ -375,11 +454,6 @@ class Gateway:
             raise GatewayError(404, "not_found", "Шаг плана не найден. Обновите страницу.")
         return 200, {"slots": self.data_store().slots(self.config.home_clinic, step["description"]), "demo": True}
 
-    def patient_episodes(self, ctx: Context) -> tuple[int, dict]:
-        mine = [raw for raw in self._episodes()
-                if (raw.get("source_report") or {}).get("patient_ref") == ctx.session.patient_ref]
-        return 200, {"episodes": [patient_episode(raw, self._explanation(raw)) for raw in mine]}
-
     def patient_episode(self, ctx: Context) -> tuple[int, dict]:
         raw = self._owned_episode(ctx, ctx.params["id"])
         return 200, {"episode": patient_episode(raw, self._explanation(raw))}
@@ -389,6 +463,39 @@ class Gateway:
                                   auth=("clinic_staff", self.config.home_clinic))
         return {p["patient_ref"]: p["full_name"] for p in body.get("patients", [])}
 
+    def patient_episodes(self, ctx: Context) -> tuple[int, dict]:
+        mine = [raw for raw in self._episodes()
+                if (raw.get("source_report") or {}).get("patient_ref") == ctx.session.patient_ref]
+        items = []
+        for raw in mine:
+            view = patient_episode(raw, self._explanation(raw))
+            view["stage"] = self._episode_stage(raw)
+            view["stage_labels"] = ["Заключение", "Рекомендация", "Запись", "Приём"]
+            items.append(view)
+        return 200, {"episodes": items}
+
+    @staticmethod
+    def _episode_stage(raw: dict) -> int:
+        """0 — заключение, 1 — рекомендация, 2 — запись, 3 — приём."""
+        status = raw.get("status")
+        if status == "completed":
+            return 3
+        steps = raw.get("plan_steps") or []
+        # Ищем активные (не superseded и не completed)
+        active = [s for s in steps if s.get("status") not in {"completed", "superseded", "closed"}]
+        for step in active:
+            st = step.get("status")
+            if st == "attended":
+                return 3
+            if st == "confirmed":
+                return 2
+            if st == "offered":
+                return 2  # предложение уже отправлено, ожидаем ответа — считаем «на шаге записи»
+            if st == "open":
+                return 1
+        if raw.get("status") == "active":
+            return 1
+        return 1
     def staff_episodes(self, ctx: Context) -> tuple[int, dict]:
         names = self._patient_names()
         pending = self.data_store().pending_patient_messages(self.config.home_clinic)
@@ -928,12 +1035,31 @@ class Gateway:
         if code not in codes:
             raise GatewayError(400, "invalid_input", "Выберите признак, который вы подтверждаете.")
         template = conclusion_templates(job, self._title(row, job), self.demo_texts).get(code)
-        # physician_id and patient_ref come from the session and the registry, never from the request body.
         data = confirm_body(ctx.session.actor, conclusion, code, template, row.get("patient_ref"))
         status, body = self.upstream.request("image", "POST", "/v1/review/" + quote(row["job_id"], safe=""),
                                              raw=data, content_type="application/json", auth="reviewer")
         if status != 200 or not isinstance(body, dict):
             raise human_error("image", status, body)
+
+        # === Rescan: если врач выбрал свой шаг — переопределяем план ===
+        override = ctx.body.get("override_step")
+        if override and body.get("routing_status") == "sent":
+            episodes_map = self._episodes_by_report()
+            raw_ep = episodes_map.get(row["job_id"])
+            if raw_ep:
+                steps = [self._normalize_override_step(override)]
+                try:
+                    self.upstream.json("path", "POST",
+                                       f"/v1/episodes/{quote(raw_ep['id'], safe='')}/revise-plan",
+                                       body={"physician_id": ctx.session.actor,
+                                             "reason": "Врач уточнил план при подтверждении",
+                                             "steps": steps},
+                                       auth="path_admin")
+                except GatewayError as exc:
+                    # Не падаем: подтверждение уже прошло, план остался стандартным
+                    self.log_override_failure(row["job_id"], str(exc))
+        # === конец override ===
+
         episodes = self._episodes_by_report() if body.get("routing_status") == "sent" else {}
         item = self._doctor_item(row, body, self._patient_names(), episodes)
         return 200, {"study": item, "next": item.get("next")}
@@ -988,6 +1114,30 @@ class Gateway:
                                               self.assistant.explain_for_patient(row["job_id"], payload))
         return 200, {"explanation": saved}
 
+    @staticmethod
+    def _normalize_override_step(override: dict) -> dict:
+        from datetime import datetime, timedelta, timezone
+        kind = override.get("kind") or "appointment"
+        description = text(override.get("description"), "description", 500)
+        due_at = override.get("due_at")
+        if not due_at and override.get("due_days"):
+            try:
+                days = int(override["due_days"])
+                due_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(timespec="seconds")
+            except (TypeError, ValueError):
+                due_at = None
+        return {
+            "kind": kind,
+            "description": description,
+            "owner": "coordinator",
+            "due_at": due_at,
+            "continue_on": "confirmed_outcome",
+        }
+
+    def log_override_failure(self, job_id: str, message: str) -> None:
+        import sys
+        print(f"[gateway] override_step failed for {job_id}: {message}", file=sys.stderr)
+
     def staff_manual_studies(self, ctx: Context) -> tuple[int, dict]:
         """For the coordinator: who waits for a manual reading, and which confirmations never reached the path service.
         No reason and no model output."""
@@ -1041,8 +1191,12 @@ class Gateway:
             if ctx.query["status"] not in {"active", "archived", "transferred", "deceased"}:
                 raise GatewayError(400, "invalid_input", "Статус карты: active, archived, transferred или deceased.")
             route += "&status=" + ctx.query["status"]
-        return 200, self._clinic(ctx, "GET", route)
-
+        body = self._clinic(ctx, "GET", route)
+        # Пробрасываем communication_channel как есть; фронт ожидает это поле
+        for p in body.get("patients", []):
+            p.setdefault("communication_channel", None)
+        return 200, body
+    
     def staff_patient_card(self, ctx: Context) -> tuple[int, dict]:
         patient_id = self._patient_id(ctx, ctx.params["ref"])
         return 200, self._clinic(ctx, "GET", f"/v1/patients/{quote(patient_id, safe='')}/card")
@@ -1178,6 +1332,241 @@ class Gateway:
         return 200, {"referrals": [{"id": r["id"], "to_clinic_name": names.get(r.get("to_clinic_id"), "Клиника-партнёр"),
                                     "reason": r.get("reason"), "status": r.get("status"), "created_at": r.get("created_at")}
                                    for r in mine]}
+        # ---------- Rescan: врач ----------
+
+    def doctor_dashboard(self, ctx: Context) -> tuple[int, dict]:
+        episodes = self._episodes()
+        names = self._patient_names()
+        rows = self.data_store().studies(self.config.home_clinic)
+        publics = self._many(self._public, [row["job_id"] for row in rows])
+        new_studies = []
+        for row, pub in zip(rows, publics):
+            if pub and pub.get("status") == "awaiting_physician":
+                job = self._review(row["job_id"])
+                if not job:
+                    continue
+                finding = (job.get("result") or {}).get("findings", [{}])
+                first = finding[0] if finding else {}
+                new_studies.append({
+                    "id": row["job_id"],
+                    "patient": names.get(row.get("patient_ref"), "Пациент"),
+                    "patient_ref": row.get("patient_ref"),
+                    "title": self._title(row, job),
+                    "modality": (job.get("study") or {}).get("modality"),
+                    "finding": first.get("description") or "",
+                    "created_at": row.get("created_at"),
+                })
+        in_progress = []
+        for raw in episodes:
+            if raw.get("status") != "active":
+                continue
+            step = self._first_unfinished(raw)
+            if not step:
+                continue
+            ref = (raw.get("source_report") or {}).get("patient_ref")
+            in_progress.append({
+                "episode_id": raw["id"],
+                "patient_ref": ref,
+                "patient": names.get(ref, "Пациент"),
+                "step": step.get("description"),
+                "step_id": step.get("id"),
+                "status": step.get("status"),
+                "due_at": step.get("due_at"),
+            })
+        return 200, {
+            "new_studies": new_studies,
+            "in_progress": in_progress,
+            "sync_status": [
+                {"label": "МИС клиники", "state": "synced", "detail": "синхронизировано"},
+                {"label": "Протоколы из РИС", "state": "synced", "detail": "подтягиваются сами"},
+                {"label": "Маршрут и статусы", "state": "synced", "detail": "пишутся в карту"},
+                {"label": "Визиты", "state": "synced", "detail": "отмечаются по данным МИС"},
+            ],
+        }
+
+    def doctor_plan_preview(self, ctx: Context) -> tuple[int, dict]:
+        row = self._registry_row(ctx.params["id"])
+        job = self._review(row["job_id"])
+        if job is None:
+            raise GatewayError(409, "study_unavailable", UNAVAILABLE)
+        study = job.get("study") or {}
+        findings = (job.get("result") or {}).get("findings") or []
+        code = findings[0].get("code") if findings else None
+        recommendation = None
+        if study and code:
+            try:
+                dry = self.upstream.json("path", "POST", "/v1/rules/dry-run", body={
+                    "study_type": (MODALITY_TYPES.get(study.get("modality")) or "ct"),
+                    "anatomy": study.get("anatomy"),
+                    "protocol_name": study.get("protocol_name"),
+                    "finding_code": code,
+                }, auth="path_admin")
+                steps = dry.get("steps") or []
+                recommendation = {
+                    "step": steps[0] if steps else None,
+                    "steps": steps,
+                    "manual_reason": dry.get("manual_reason"),
+                    "rule_version": dry.get("rule_version"),
+                }
+            except GatewayError:
+                recommendation = {"step": None, "steps": [], "manual_reason": "no_rule", "rule_version": None}
+        specialists = self.data_store().specialists(self.config.home_clinic)
+        return 200, {
+            "recommendation": recommendation,
+            "finding_code": code,
+            "study": {k: study.get(k) for k in ("modality", "anatomy", "protocol_name")} if study else None,
+            "specialists": specialists,
+            "due_options": [
+                {"days": 7, "label": "7 дней"},
+                {"days": 14, "label": "2 недели"},
+                {"days": 30, "label": "1 месяц"},
+                {"days": 90, "label": "3 месяца"},
+            ],
+        }
+
+    def doctor_skip_step(self, ctx: Context) -> tuple[int, dict]:
+        row = self._registry_row(ctx.params["id"])
+        job = self._review(row["job_id"])
+        if job is None or job.get("status") != "awaiting_physician":
+            raise GatewayError(409, "study_unavailable",
+                               "Исследование уже подтверждено или не ждёт проверки врача.")
+        conclusion = text(ctx.body.get("conclusion"), "conclusion", MAX_CONCLUSION)
+        codes = list(dict.fromkeys(f.get("code") for f in (job.get("result") or {}).get("findings") or []))
+        code = codes[0] if len(codes) == 1 else ctx.body.get("finding_code")
+        if code not in codes:
+            raise GatewayError(400, "invalid_input", "Выберите признак.")
+        template = conclusion_templates(job, self._title(row, job), self.demo_texts).get(code)
+        data = confirm_body(ctx.session.actor, conclusion, code, template, row.get("patient_ref"))
+        status, body = self.upstream.request("image", "POST", "/v1/review/" + quote(row["job_id"], safe=""),
+                                             raw=data, content_type="application/json", auth="reviewer")
+        if status != 200 or not isinstance(body, dict):
+            raise human_error("image", status, body)
+        # Если эпизод уже создан — останавливаем его
+        if body.get("routing_status") == "sent":
+            episodes = self._episodes_by_report()
+            raw = episodes.get(row["job_id"])
+            if raw:
+                try:
+                    self.upstream.json("path", "POST", f"/v1/episodes/{quote(raw['id'], safe='')}/stop",
+                                       body={"actor": ctx.session.actor,
+                                             "reason": ctx.body.get("reason") or "Врач не назначил шаг"},
+                                       auth="path_admin")
+                except GatewayError:
+                    pass
+        item = self._doctor_item(row, body, self._patient_names(), {})
+        return 200, {"study": item, "next": {"warning": "Пациент получит заключение без записи"}}
+
+    def doctor_appointments(self, ctx: Context) -> tuple[int, dict]:
+        from datetime import date, timedelta
+        today = date.today()
+        from_iso = ctx.query.get("from") or (today - timedelta(days=7)).isoformat()
+        to_iso = ctx.query.get("to") or (today + timedelta(days=60)).isoformat()
+        appts = self.data_store().appointments_between(self.config.home_clinic, from_iso, to_iso)
+        names = self._patient_names()
+        # Шаги достанем один раз
+        episodes = {raw["id"]: raw for raw in self._episodes()}
+        result = []
+        for a in appts:
+            ep = episodes.get(a["episode_id"]) or {}
+            step = next((s for s in ep.get("plan_steps", []) if s.get("id") == a["step_id"]), {})
+            result.append({
+                **a,
+                "patient_name": names.get(a["patient_ref"], "Пациент не указан"),
+                "physician_name": step.get("owner") or "Координатор",
+                "reason": step.get("description") or "",
+                "clinic_name": "Клиника «Линия здоровья»",
+            })
+        return 200, {"appointments": result}
+
+    def doctor_integrations(self, ctx: Context) -> tuple[int, dict]:
+        health = self.upstream.health_all()
+        partners = []
+        try:
+            partners = self.upstream.json("clinic", "GET", "/v1/partnerships",
+                                          auth=("clinic_staff", self.config.home_clinic)).get("partners", [])
+        except GatewayError:
+            pass
+        return 200, {
+            "mis": {"connected": True, "last_sync": None, "name": "МедИС"},
+            "ris": {"connected": True, "name": "PACS-1"},
+            "ai": {"connected": health.get("image", {}).get("status") == "up",
+                   "name": "Третье Мнение", "models": 4},
+            "channels": {"connected": 5, "total": 5,
+                         "list": ["Telegram", "MAX", "VK", "SMS", "email"]},
+            "partners": {"clinics": len(partners),
+                         "pharmacies": len(self.upstream.medications_with_staff())},
+        }
+
+    # ---------- Rescan: пациент ----------
+
+    def patient_settings_get(self, ctx: Context) -> tuple[int, dict]:
+        data = self.data_store().patient_settings(ctx.session.patient_ref)
+        defaults = {
+            "notifications": {"reminders": True, "new_results": True, "weekly_report": False},
+            "channels": {"telegram": True, "max": False, "sms": True, "email": True},
+        }
+        merged = {**defaults, **data}
+        # Добавим клинику и её название
+        try:
+            card = self.upstream.patient_by_ref(ctx.session.patient_ref)
+        except GatewayError:
+            card = None
+        merged["clinic"] = {"id": (card or {}).get("home_clinic_id"),
+                            "name": (card or {}).get("home_clinic_name")}
+        return 200, merged
+
+    def patient_settings_post(self, ctx: Context) -> tuple[int, dict]:
+        body = ctx.body or {}
+        current = self.data_store().patient_settings(ctx.session.patient_ref)
+        merged = {**current, **body}
+        saved = self.data_store().save_patient_settings(ctx.session.patient_ref, merged)
+        return 200, {"status": "saved", "settings": saved}
+
+    def patient_self_meds_get(self, ctx: Context) -> tuple[int, dict]:
+        return 200, {"medications": self.data_store().self_medications(ctx.session.patient_ref)}
+
+    def patient_self_meds_post(self, ctx: Context) -> tuple[int, dict]:
+        body = ctx.body or {}
+        name = text(body.get("name"), "name", 128)
+        dose = text(body.get("dose"), "dose", 128)
+        time_slot = text(body.get("time_slot"), "time_slot", 16)
+        form = text(body.get("form"), "form", 32)
+        if time_slot not in {"morning", "day", "evening"}:
+            raise GatewayError(400, "invalid_input", "Время: morning, day или evening.")
+        saved = self.data_store().add_self_medication(ctx.session.patient_ref, name, dose, time_slot, form)
+        return 201, {"medication": saved}
+
+    def patient_self_meds_remove(self, ctx: Context) -> tuple[int, dict]:
+        self.data_store().remove_self_medication(ctx.session.patient_ref, ctx.params["id"])
+        return 200, {"status": "removed"}
+
+    def patient_calendar(self, ctx: Context) -> tuple[int, dict]:
+        # Собираем все записи и все self-medications за месяц (упрощённо — на 30 дней вперёд и 7 назад)
+        from datetime import date, timedelta
+        today = date.today()
+        days = {}
+        for offset in range(-7, 31):
+            d = (today + timedelta(days=offset)).isoformat()
+            days[d] = {"date": d, "visits": 0}
+        # Визиты
+        for a in self.data_store().appointments_between(self.config.home_clinic, today.isoformat(),
+                                                        (today + timedelta(days=31)).isoformat()):
+            d = a["starts_at"][:10]
+            if d in days:
+                days[d]["visits"] = days[d].get("visits", 0) + 1
+        # Приёмы на сегодня (по self-medications)
+        today_list = []
+        for m in self.data_store().self_medications(ctx.session.patient_ref):
+            hour = {"morning": "08:00", "day": "13:00", "evening": "20:00"}[m["time_slot"]]
+            today_list.append({"id": m["id"], "kind": "self_medication", "name": m["name"],
+                               "time": hour, "dose": m["dose"]})
+        return 200, {"days": list(days.values()), "today": today_list, "month": today.isoformat()[:7]}
+
+    def patient_payment_methods(self, ctx: Context) -> tuple[int, dict]:
+        return 200, {"methods": [
+            {"id": "dms", "label": "Полис ДМС", "detail": "•••• 4242", "enabled": True},
+            {"id": "cash", "label": "Оплата в клинике", "detail": "по прайсу", "enabled": True},
+        ]}
 
     def _partner_booking(self, ctx: Context, raw: dict, step: dict) -> tuple[int, dict]:
         """The coordinator enters the time the partner reported: offer + confirm, marked «у партнёра»."""

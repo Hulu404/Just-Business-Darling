@@ -1,4 +1,4 @@
-"""Demo-role sessions: one cookie per role, so windows of different roles work side by side."""
+"""Demo-role sessions: one cookie per role."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ from threading import Lock
 
 from errors import GatewayError
 
-ROLES = ("patient", "staff", "doctor", "partner")
+ROLES = ("patient", "staff", "doctor", "partner", "pharmacy")
 SESSION_TTL = 12 * 3600
 
 
@@ -38,19 +38,15 @@ class Session:
 
     @property
     def actor(self) -> str:
-        """Identity for actor, physician_id, author_id and created_by in upstream calls."""
         return self.person_id
 
 
 def ensure_owner(session: Session, patient_ref: str | None) -> None:
-    """A patient session sees only its own objects. Others get 404, so foreign ids reveal nothing."""
     if session.role == "patient" and (not patient_ref or patient_ref != session.patient_ref):
         raise GatewayError(404, "not_found", "Не нашли то, что запрошено. Обновите страницу.")
 
 
 class People:
-    """Fictional people of the demo stand (demo_stand/people.demo.json)."""
-
     def __init__(self, path: Path):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         self.staff = {p["id"]: p for p in data["staff"]}
