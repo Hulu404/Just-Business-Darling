@@ -8,6 +8,7 @@ import { installPathExtra, pathAnalytics, pathDoctor, pathRules, refreshPathExtr
 import { imagingPage, installImagingActions, isImagingListPage, readingPage, refreshImaging, studyPage } from './imaging-ui.js';
 import { analyticsClinicBlock, documentsReferrals, incomingPage, installClinicActions, isClinicPage, partnersPage, referralPage, refreshClinic } from './clinic-ui.js';
 import { documents } from './pages/patient.js';
+import { RESCAN_PAGES, installRescanActions, isRescanPage, refreshRescan, setRescanRender } from './rescan-ui.js';
 
 const ROLES = ['patient', 'staff', 'doctor', 'partner'];
 const DEFAULT_PARTNER = 'clinic-partner-1';
@@ -18,12 +19,20 @@ Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointment
                       imaging:imagingPage, reading:readingPage, study:studyPage,
                       partners:partnersPage, incoming:incomingPage, referral:referralPage,
                       documents:() => documents() + documentsReferrals(),
-                      analytics:() => pathAnalytics() + analyticsClinicBlock()});
+                      analytics:() => pathAnalytics() + analyticsClinicBlock(), ...RESCAN_PAGES});
 installPathActions(ACTIONS);
 installPathExtra(ACTIONS);
 installImagingActions(ACTIONS);
 installClinicActions(ACTIONS);
-const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); };
+installRescanActions(ACTIONS);
+/* Перерисовка кабинета по приходу данных не сбрасывает фокус и курсор в поле поиска */
+setRescanRender(() => {
+  const active = document.activeElement, id = active && active.id, at = active && active.selectionStart;
+  render();
+  const field = id && document.getElementById(id);
+  if (field && field !== active && field.tagName === 'INPUT'){ field.focus({preventScroll:true}); try { field.setSelectionRange(at, at); } catch (err){} }
+});
+const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); refreshRescan(); };
 const sessionRequests = {};
 
 /* Окно клиники-партнёра хранит клинику в адресе: #/partner/incoming?clinic=clinic-partner-2 */
@@ -89,6 +98,7 @@ async function refreshHealth(){
   renderBanner();
   renderShell();  // в списке ролей — клиники-партнёры из /api/health
   if (state.page === 'services' && !ui.modal) render();
+  else if (isRescanPage()) ACTIONS.rsRender();  // «Настройки» и шрифт кабинета — из /api/health
 }
 
 ACTIONS.sessionRetry = () => { delete sessions[state.role]; ensureSession(state.role); };
@@ -107,3 +117,4 @@ setInterval(() => { if (isPathPage()) refreshPath(); }, HEALTH_EVERY);
 setInterval(refreshPathExtra, HEALTH_EVERY);
 setInterval(() => { if (isImagingListPage()) refreshImaging(); }, HEALTH_EVERY);
 setInterval(() => { if (isClinicPage() && state.page !== 'referral') refreshClinic(); }, HEALTH_EVERY);
+setInterval(() => { if (isRescanPage()) refreshRescan(); }, HEALTH_EVERY);

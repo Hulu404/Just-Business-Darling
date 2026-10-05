@@ -4,6 +4,7 @@ import { icon } from './icons.js';
 import { doctor } from './pages/doctor.js';
 import { appointments, documents, home, intake, messages, pharmacy, plan, result, review } from './pages/patient.js';
 import { services } from './pages/services.js';
+import { isRescanPage, modebar } from './rescan-ui.js';
 import { analytics, comms, inbox, pharmacyAdmin, requests, rules, scheduling } from './pages/staff.js';
 import { health, sessions, state, ui } from './state.js';
 import { $, badge, errorNote, loadingCards, renderModal, safe, serviceBanner } from './ui.js';
@@ -40,16 +41,26 @@ export function pageTitle(){
   return t[state.page] || 'МедМаршрут';
 }
 export function renderShell(){
+  /* Кабинет rescan: прежние боковая панель и шапка скрыты, на месте шапки — полоса с логотипом и тем же #role */
+  if (isRescanPage()){
+    $('#sidebar').className = 'sidebar';
+    $('#sidebar').innerHTML = '';
+    $('#topbar').className = 'modebar';
+    $('#topbar').innerHTML = modebar(roleSelect());
+    return;
+  }
+  $('#topbar').className = 'topbar';
   const nav = NAVS[state.role] || NAVS.patient;
   const parent = {case:'inbox', study:state.role === 'patient' ? 'imaging' : 'reading', referral:'incoming'}[state.page] || state.page;
   const item = ([id, ic, label]) => { const n = navCount(id); return `<button data-nav="${id}" class="${parent === id ? 'active' : ''}"><span class="icon">${icon(ic)}</span>${label}${n ? `<span class="count">${n}</span>` : ''}</button>`; };
   $('#sidebar').className = 'sidebar' + (ui.mobileOpen ? ' open' : '');
   $('#sidebar').innerHTML = `<div class="brand"><span class="brandmark">+</span><div>МедМаршрут<small>Демо-стенд</small></div></div>
-    <div class="rolebox"><label for="role">Режим просмотра</label><select id="role"><option value="patient" ${state.role === 'patient' ? 'selected' : ''}>Пациент</option><option value="staff" ${state.role === 'staff' ? 'selected' : ''}>Сотрудник клиники</option><option value="doctor" ${state.role === 'doctor' ? 'selected' : ''}>Врач</option>${partnerOptions()}</select></div>
+    <div class="rolebox"><label for="role">Режим просмотра</label>${roleSelect()}</div>
     <nav class="nav">${nav.map(item).join('')}${state.role === 'patient' ? `<button data-action="new"><span class="icon">${icon('plus')}</span>Новое обращение</button>` : ''}<div class="navsep"></div>${item(['services', 'map', 'Карта сервисов'])}</nav>
     <div class="sidefoot">Демо клиники «Линия здоровья».<br>Все пациенты, записи и цифры в прототипе вымышленные.<br><button data-action="reset">Сбросить демо</button></div>`;
   $('#topbar').innerHTML = `<div style="display:flex;align-items:center;gap:12px"><button class="mobilemenu" data-action="menu" aria-label="Меню">${icon('menu')}</button><strong>${safe(pageTitle())}</strong></div><div class="topright">${badge(roleName())}<span class="muted hidem" style="font-size:13px">Демо-режим</span></div>`;
 }
+const roleSelect = () => `<select id="role"><option value="patient" ${state.role === 'patient' ? 'selected' : ''}>Пациент</option><option value="staff" ${state.role === 'staff' ? 'selected' : ''}>Сотрудник клиники</option><option value="doctor" ${state.role === 'doctor' ? 'selected' : ''}>Врач</option>${partnerOptions()}</select>`;
 /* Клиники-партнёры с токеном на стенде — из /api/health; своя клиника окна видна и до ответа */
 function partnerOptions(){
   const list = (health.data?.partner_clinics || []).slice();
@@ -59,6 +70,7 @@ function partnerOptions(){
 export function render(){
   const fn = PAGES[state.page] || PAGES[HOME[state.role]];
   const html = sessionGate() || fn();
+  document.body.classList.toggle('m-clinic', isRescanPage());
   renderShell();
   renderBanner();
   $('#view').innerHTML = html;

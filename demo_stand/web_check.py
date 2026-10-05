@@ -25,6 +25,8 @@ SCREENS = [
     ("doctor", "reading"), ("doctor", "study"), ("doctor", "doctor"), ("doctor", "requests"), ("doctor", "inbox"),
     ("patient", "services"), ("staff", "services"), ("doctor", "services"),
     ("partner", "incoming"), ("partner", "services"),
+    # rescan doctor cabinet (task 12): opened by address until the switch-over cycle
+    ("doctor", "rsToday"), ("doctor", "rsStudies"), ("doctor", "rsPatients"), ("doctor", "rsVisits"), ("doctor", "rsSettings"),
 ]
 WIDTHS = (390, 820, 1280, 1680)
 MAX_DIFF = 0.01
@@ -32,7 +34,8 @@ MAX_DIFF = 0.01
 # Pixel comparison with the prototype. A screen leaves this list when it moves to service data (tasks 04-07).
 COMPARE = [s for s in SCREENS if s[1] not in {"services", "home", "plan", "appointments", "inbox", "case", "scheduling",
                                              "imaging", "reading", "study", "review", "rules", "analytics", "doctor",
-                                             "partners", "documents", "incoming"}]
+                                             "partners", "documents", "incoming",
+                                             "rsToday", "rsStudies", "rsPatients", "rsVisits", "rsSettings"}]
 # Intentional differences. Masked areas are painted over in both screenshots before comparing.
 MASKS = [".brand small"]  # sidebar subtitle: «Демо-стенд» instead of «Прототип · версия 2»
 INTENTIONAL = [
@@ -42,6 +45,7 @@ INTENTIONAL = [
     "экраны снимков работают на сервисе снимков: настоящие срезы вместо схем, загрузка ZIP с DICOM (не сравниваются)",
     "создание маршрута выключено до задания 07",
     "«Партнёры», «Документы» и кабинет клиники-партнёра работают на сервисе клиники: без выдуманных чисел (не сравниваются)",
+    "кабинет врача rescan (rs*) сделан по другому образцу, prototype/rescan-app-standalone.html (не сравнивается)",
 ]
 CSP_PROBE = ("window.__mmCsp = [];"
              "document.addEventListener('securitypolicyviolation', e => window.__mmCsp.push(e.violatedDirective + ' ' + e.blockedURI));")
@@ -52,7 +56,7 @@ def say(ok: bool, text: str) -> None:
 
 
 def wait_ready(page) -> None:
-    page.wait_for_function("() => document.querySelector('#view').children.length && !document.querySelector('.card.skeleton')",
+    page.wait_for_function("() => document.querySelector('#view').children.length && !document.querySelector('.card.skeleton, .c-skel')",
                            timeout=8000)
 
 
