@@ -5,6 +5,7 @@ import { api } from './api.js';
 import { health, sessions, state, ui } from './state.js';
 import { go, safe } from './ui.js';
 import { installStudyActions, rsStudies, studyNeeds } from './rescan-studies.js';
+import { installVisitActions, rsVisits, visitNeeds } from './rescan-visits.js';
 
 export const RS_PAGES = ['rsToday', 'rsStudies', 'rsPatients', 'rsVisits', 'rsSettings'];
 export const isRescanPage = () => state.role === 'doctor' && RS_PAGES.includes(state.page);
@@ -45,10 +46,12 @@ const LOADERS = {
   studies:() => api('GET', '/api/doctor/studies', {role:'doctor'}).then(b => b.studies || []),
   patients:() => api('GET', '/api/staff/patients', {role:'doctor'}).then(b => b.patients || []),
   visits:() => api('GET', '/api/doctor/visits', {role:'doctor'}).then(b => b.visits || []),
-  assistant:() => api('GET', '/api/assistant/status', {role:'doctor'})
+  assistant:() => api('GET', '/api/assistant/status', {role:'doctor'}),
+  catalog:() => api('GET', '/api/catalog', {role:'doctor'}),
+  rules:() => api('GET', '/api/staff/rules', {role:'doctor'})
 };
 /* Открытое исследование по таймеру не перечитывается: правка врача не должна пропасть */
-const NEEDS = {rsToday:() => ['studies'], rsStudies:studyNeeds, rsPatients:() => ['patients'], rsVisits:() => ['visits'], rsSettings:() => ['assistant']};
+const NEEDS = {rsToday:() => ['studies'], rsStudies:studyNeeds, rsPatients:() => ['patients'], rsVisits:visitNeeds, rsSettings:() => ['assistant']};
 export const rs = {};
 const inflight = {};
 let rerender = () => {};
@@ -121,10 +124,6 @@ function rsPatients(){
   return head('Пациенты', 'Карта пациента, шаг маршрута и срок') +
     stateOf('patients', list => list.length ? later('Таблица пациентов с фильтрами и карточкой появится здесь.') : empty('Пациентов нет', 'Карты пациентов клиники появятся здесь.'));
 }
-function rsVisits(){
-  return head('Приёмы', 'Записи пациентов и итог приёма') +
-    stateOf('visits', list => list.length ? later('Таблица визитов, календарь и форма итога приёма появятся здесь.') : empty('Записей нет', 'Когда пациент или координатор запишет пациента, визит появится здесь.'));
-}
 function rsSettings(){
   return head('Настройки', 'Что подключено на стенде') +
     stateOf('assistant', () => later('Состояние сервисов, режим снимков и ИИ-помощник появятся здесь.'));
@@ -142,6 +141,7 @@ export function installRescanActions(ACTIONS){
   ACTIONS.rsFeed = () => { ui.rsFeed = !ui.rsFeed; rerender(); };
   ACTIONS.rsRender = () => rerender();
   installStudyActions(ACTIONS);
+  installVisitActions(ACTIONS);
   /* Поиск пациента: текст живёт в ui.rsQuery, Enter открывает «Пациентов» */
   document.addEventListener('input', e => { if (e.target.id === 'rsQuery') ui.rsQuery = e.target.value; });
   document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'rsQuery' && state.page !== 'rsPatients') go('rsPatients'); });

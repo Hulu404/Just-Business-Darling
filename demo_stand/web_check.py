@@ -293,6 +293,56 @@ def check_rescan_imaging(browser) -> list[str]:
     return failures
 
 
+def check_rescan_visits(browser) -> list[str]:
+    """rescan cabinet, «Приёмы»: the doctor keeps the screen open, the patient books in another window and the visit
+    appears without a reload within 20 s; the doctor saves the outcome with a next step and the patient sees it."""
+    context = browser.new_context(viewport={"width": 1280, "height": 900})
+    patient, doctor = context.new_page(), context.new_page()
+    patient_errors, doctor_errors = watch(patient), watch(doctor)
+    failures = []
+    doctor.goto(APP + "/#/doctor/rsVisits")
+    wait_ready(doctor)
+    rows = "() => [...document.querySelectorAll('#clinic .c-tbl tbody tr[data-step]')].map(r => r.dataset.step)"
+    before = doctor.evaluate(rows)
+    patient.goto(APP + "/#/patient/plan")
+    wait_ready(patient)
+    if not patient.query_selector("[data-action=pathChoose]"):
+        context.close()
+        return ["у пациента нет шага, на который можно записаться"]
+    patient.click("[data-action=pathChoose] >> nth=0")
+    patient.wait_for_selector("[data-action=pathBook]")
+    patient.click("[data-action=pathBook] >> nth=0")
+    patient.wait_for_selector(".note:has-text('Вы записаны')")
+    try:
+        doctor.wait_for_function(f"() => ({rows})().some(s => !{before!r}.includes(s))", timeout=20000)
+    except PlaywrightError:
+        context.close()
+        return ["запись пациента не появилась у врача за 20 секунд без обновления страницы"]
+    step = next(s for s in doctor.evaluate(rows) if s not in before)
+    row = f"#clinic .c-tbl tr[data-step='{step}']"
+    if "Демо-пациент" not in doctor.inner_text(row):
+        failures.append("в новой строке не пациент, который записался")
+    doctor.click(f"{row} [data-action=rsOutcomeOpen]")
+    doctor.wait_for_selector("#rsOutcome")
+    doctor.fill("#rsOutSummary", "Осмотр проведён, назначен контроль.")
+    for box in doctor.query_selector_all("#rsOutcome [data-rs-step]:checked"):
+        box.uncheck()
+    planned = "Контрольный приём терапевта, демо"
+    doctor.fill("#rsOutCustom", planned)
+    doctor.click("[data-action=rsOutcomeSave]")
+    doctor.wait_for_selector("#rsOutcome", state="detached", timeout=20000)
+    patient.goto(APP + "/#/patient/plan")
+    wait_ready(patient)
+    try:
+        patient.wait_for_selector(f"#view:has-text('{planned}')", timeout=10000)
+    except PlaywrightError:
+        failures.append("после итога приёма у пациента нет нового шага")
+    if patient_errors or doctor_errors:
+        failures.append("ошибки в консоли: " + "; ".join(patient_errors + doctor_errors))
+    context.close()
+    return failures
+
+
 def check_referral(browser) -> list[str]:
     """Coordinator and partner windows side by side: the seeded referral of Олег Р. without a name until accepted,
     the partner's time, «услуга оказана», and the coordinator marks the visit."""
@@ -407,6 +457,7 @@ def main() -> int:
                       ("Два окна с разными ролями не мешают друг другу", check_two_windows),
                       ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging),
                       ("Кабинет rescan, «Исследования»: предпросмотр по правилу, настоящие срезы, подтверждение, цепочка маршрута", check_rescan_imaging),
+                      ("Кабинет rescan, «Приёмы»: запись пациента появляется у врача за 20 с без обновления, итог создаёт следующий шаг", check_rescan_visits),
                       ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral)]
             for title, check in checks:
                 failures = check(browser)
