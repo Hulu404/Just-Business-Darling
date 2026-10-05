@@ -2,6 +2,8 @@
    заключение врача и маршрут. Шаг пациенту назначает правило клиники: до подтверждения — только предпросмотр. */
 import { api } from './api.js';
 import { k, empty, head, load, redraw, rs, stateOf } from './rescan-ui.js';
+import { planButton, planCard } from './rescan-plan.js';
+import { current } from './path-ui.js';
 import { state, ui } from './state.js';
 import { $, go, plural, safe, toast } from './ui.js';
 
@@ -24,7 +26,7 @@ const det = {id:null, status:'idle', data:null, message:'', index:0, drafts:{}, 
 
 /* Ожидающие проверки — первыми, как в образце */
 const ordered = list => [...list].sort((a, b) => (b.status === 'awaiting_physician') - (a.status === 'awaiting_physician'));
-export function studyNeeds(timer){ return timer && det.status === 'ok' ? [] : ['studies', 'assistant']; }
+export function studyNeeds(timer){ return timer && det.status === 'ok' ? [] : ['studies', 'assistant', 'episodes', 'catalog', 'rules']; }
 
 async function loadDetail(id){
   Object.assign(det, {id, status:'loading', data:null, message:'', index:0, drafts:{}, code:null, suggest:null});
@@ -96,14 +98,21 @@ function routeCard(st){
       <span class="c-demo">До подтверждения пациент и координатор видят только статус «Врач проверяет».</span></div>`;
   }
   if (st.status === 'confirmed'){
-    const n = st.next || {};
-    const booked = ['confirmed', 'attended'].includes(n.step_status), came = n.step_status === 'attended' || n.status === 'completed';
+    /* Свежий эпизод из списка важнее next открытого исследования: врач мог уже назначить или изменить план */
+    const fresh = st.next?.episode_id && (rs.episodes?.data || []).find(x => x.id === st.next.episode_id);
+    const step = fresh && current(fresh);
+    const n = fresh ? {...st.next, status:fresh.status, step:fresh.status === 'active' ? step?.description : null, step_status:step?.status || null, reason:fresh.reason,
+                               reached:fresh.steps.some(x => ['attended', 'completed'].includes(x.status))} : st.next || {};
+    const came = n.reached || n.step_status === 'attended' || n.status === 'completed', booked = came || ['confirmed', 'attended'].includes(n.step_status);
     const chain = [['Заключение', true], ['Подтверждено', true], ['Записан', booked || came], ['Пришёл', came]]
       .map(([label, on]) => `<span class="${on ? 'on' : ''}"><i>${on ? k('check', 12, 2.6) : ''}</i>${label}</span>`).join('');
     const body = n.warning ? `<div class="c-err"><p>${safe(n.warning)}</p></div>`
       : n.status === 'manual_review' ? `<div class="c-kv"><span>Ручной разбор</span><span>${safe(n.reason)}</span></div>`
       : `<div class="c-kv"><span>Шаг</span><span>${safe(n.step || (n.status === 'completed' ? 'План выполнен' : n.status === 'paused' ? 'Маршрут на паузе' : '—'))}</span></div>`;
-    return `<div class="c-card c-dec"><div class="c-ch"><span><h2>Маршрут</h2><span class="sub">подтверждено ${safe(fmt(st.confirmation?.confirmed_at))}</span></span>${pill(st.status)}</div><div class="c-path">${chain}</div>${body}</div>`;
+    /* План врача после подтверждения: «Назначить план» при ручном разборе, «Изменить план» у активного маршрута */
+    const e = fresh;
+    const plan = planButton(e);
+    return `<div class="c-card c-dec"><div class="c-ch"><span><h2>Маршрут</h2><span class="sub">подтверждено ${safe(fmt(st.confirmation?.confirmed_at))}</span></span>${pill(st.status)}</div><div class="c-path">${chain}</div>${body}${plan ? `<div class="c-act">${plan}</div>` : ''}</div>${planCard(e)}`;
   }
   return `<div class="c-card"><div class="c-ch"><span><h2>Маршрут</h2></span>${pill(st.status)}</div><span style="font-size:13px;color:var(--c-fg2)">Маршрута нет: исследование не подтверждается через сервис.</span></div>`;
 }

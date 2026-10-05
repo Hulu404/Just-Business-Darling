@@ -10,10 +10,10 @@ const routePages = new Set(['home', 'plan', 'appointments', 'inbox', 'case', 'sc
 export const isPathPage = () => routePages.has(state.page) && (state.role === 'patient' || state.role === 'staff' || state.role === 'doctor');
 const path = {role:null, status:'loading', items:[], requests:[], message:'', slots:[], slotStatus:'loading', slotMessage:'', slotKey:''};
 const fmt = value => { if (!value) return ''; const d = new Date(value); return Number.isNaN(+d) ? String(value) : new Intl.DateTimeFormat('ru-RU', {day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'}).format(d); };
-const current = e => e.steps.find(s => !['completed', 'superseded', 'closed'].includes(s.status));
+export const current = e => e.steps.find(s => !['completed', 'superseded', 'closed'].includes(s.status));
 const keyOf = (e, s) => `${e.id}:${s.id}`;
 const byKey = key => { const [id, stepId] = String(key || '').split(':'); const e = path.items.find(x => x.id === id); return [e, e?.steps.find(s => s.id === stepId)]; };
-const statusName = status => ({open:'Нужно записаться', offered:'Предложена запись', confirmed:'Вы записаны', attended:'Ждём итог врача', completed:'Выполнено', cancelled:'Запись отменена', lost_contact:'Нет связи с пациентом', closed:'Закрыт', manual_review:'Врач уточняет план', paused:'Отложено', active:'В работе', superseded:'Заменён'})[status] || status;
+export const statusName = status => ({open:'Нужно записаться', offered:'Предложена запись', confirmed:'Вы записаны', attended:'Ждём итог врача', completed:'Выполнено', cancelled:'Запись отменена', lost_contact:'Нет связи с пациентом', closed:'Закрыт', manual_review:'Врач уточняет план', paused:'Отложено', active:'В работе', superseded:'Заменён'})[status] || status;
 const tone = status => ({open:'orange', offered:'blue', attended:'blue', manual_review:'orange', paused:'red', cancelled:'red', completed:'gray', closed:'gray', superseded:'gray'})[status] || '';
 const header = (eyebrow, title, description = '') => `<div class="pagehead"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1>${description ? `<p>${description}</p>` : ''}</div></div>`;
 const ready = () => path.role === state.role && path.status === 'ok';
@@ -120,7 +120,7 @@ export function pathAppointments(){
     <div class="stack"><div class="panel"><h3>Нет подходящего времени?</h3><p>Координатор проверит другие варианты и свяжется с вами.</p>${btn('Попросить координатора', 'pathAsk', 'secondary', {key:keyOf(e,s), intent:'callback'})}</div></div></div>`;
 }
 
-const staffReason = e => e.reason || (e.status === 'active' ? current(e)?.status === 'open' ? 'Пациент не выбрал время' : current(e)?.status === 'attended' ? 'Ждём итог врача' : 'Идёт по плану' : statusName(e.status));
+export const staffReason = e => e.reason || (e.status === 'active' ? current(e)?.status === 'open' ? 'Пациент не выбрал время' : current(e)?.status === 'attended' ? 'Ждём итог врача' : 'Идёт по плану' : statusName(e.status));
 const staffNeed = e => e.status === 'manual_review' || e.status === 'paused' || e.callback || ['open','attended'].includes(current(e)?.status);
 function staffRow(e){ const s = current(e); return `<tr><td><strong>${safe(e.patient)}</strong></td><td>${safe(e.title)}<small>${safe(fmt(e.created_at))}</small></td><td>${s ? stepTitle(s) : '—'}</td><td>${safe(staffReason(e))}</td><td>${badge(statusName(e.status), tone(e.status))}</td><td><button class="btn secondary small" data-case="${safe(e.id)}">Открыть</button></td></tr>`; }
 

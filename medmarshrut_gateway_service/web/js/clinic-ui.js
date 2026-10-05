@@ -13,10 +13,10 @@ const head = (eyebrow, title, text = '') => `<div class="pagehead"><div><div cla
 export const REF_STATUS = {proposed:['Ждёт ответа партнёра', 'orange'], accepted:['Принято партнёром', 'blue'], completed:['Услуга оказана', ''],
                            rejected:['Отклонено партнёром', 'red'], cancelled:['Отменено', 'gray']};
 const refBadge = status => badge(...(REF_STATUS[status] || [status, 'gray']));
-const KINDS = {diagnosis:'Диагноз', allergy:'Аллергия', medication:'Лекарства', surgery:'Операция', family_history:'Семейный анамнез',
+export const KINDS = {diagnosis:'Диагноз', allergy:'Аллергия', medication:'Лекарства', surgery:'Операция', family_history:'Семейный анамнез',
                risk_factor:'Фактор риска', note:'Заметка', measurement:'Измерение', lab:'Анализ'};
 const SEX = {M:'мужской', F:'женский', X:'не указан'};
-const age = birth => { if (!birth) return null; const b = new Date(birth), n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) a--; return a; };
+export const age = birth => { if (!birth) return null; const b = new Date(birth), n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) a--; return a; };
 
 /* ---------- Загрузка ---------- */
 const page = {key:'', status:'loading', message:'', data:{}};

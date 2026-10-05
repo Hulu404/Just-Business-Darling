@@ -325,7 +325,7 @@ def check_rescan_visits(browser) -> list[str]:
     doctor.click(f"{row} [data-action=rsOutcomeOpen]")
     doctor.wait_for_selector("#rsOutcome")
     doctor.fill("#rsOutSummary", "Осмотр проведён, назначен контроль.")
-    for box in doctor.query_selector_all("#rsOutcome [data-rs-step]:checked"):
+    for box in doctor.query_selector_all("#rsOutcome [data-step-of=rsOut]:checked"):
         box.uncheck()
     planned = "Контрольный приём терапевта, демо"
     doctor.fill("#rsOutCustom", planned)
@@ -340,6 +340,47 @@ def check_rescan_visits(browser) -> list[str]:
     if patient_errors or doctor_errors:
         failures.append("ошибки в консоли: " + "; ".join(patient_errors + doctor_errors))
     context.close()
+    return failures
+
+
+def check_rescan_patients(browser) -> list[str]:
+    """rescan cabinet, «Пациенты»: Мария К. (manual review) gets the doctor's plan from her card; an anamnesis entry
+    added by the doctor is still in the card after a page reload."""
+    import uuid
+    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    errors = watch(page)
+    failures = []
+    maria = "#clinic tr[data-ref='demo-patient-2']"
+    page.goto(APP + "/#/doctor/rsPatients")
+    wait_ready(page)
+    page.click(maria)
+    page.wait_for_selector(f"{maria}.live")
+    if "Врач уточняет план" not in page.inner_text(maria):
+        failures.append("Мария К. не на ручном разборе: " + page.inner_text(maria).replace(chr(10), " "))
+    page.click("[data-action=rsPlanOpen][data-mode=manual]")
+    page.wait_for_selector("#rsPlan")
+    if not page.query_selector("#rsPlan [data-step-of=rsPlan]:checked"):
+        page.fill("#rsPlanCustom", "Дообследование по решению врача, демо")
+    page.click("[data-action=rsPlanSave]")
+    page.wait_for_selector("#rsPlan", state="detached", timeout=20000)
+    try:
+        page.wait_for_function(f"() => (document.querySelector(\"{maria}\")?.innerText || '').includes('В работе')", timeout=20000)
+    except PlaywrightError:
+        failures.append("после плана врача Мария К. не перешла в «В работе»")
+    note = "Демо-запись анамнеза " + uuid.uuid4().hex[:8]
+    page.fill("#rsAnText", note)
+    page.click("[data-action=rsAnamnesisAdd]")
+    page.wait_for_selector(f"#rsPatientCard:has-text('{note}')", timeout=20000)
+    page.reload()
+    wait_ready(page)
+    page.click(maria)
+    try:
+        page.wait_for_selector(f"#rsPatientCard:has-text('{note}')", timeout=20000)
+    except PlaywrightError:
+        failures.append("запись в анамнез не видна после обновления страницы")
+    if errors:
+        failures.append("ошибки в консоли: " + "; ".join(errors))
+    page.close()
     return failures
 
 
@@ -458,6 +499,7 @@ def main() -> int:
                       ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging),
                       ("Кабинет rescan, «Исследования»: предпросмотр по правилу, настоящие срезы, подтверждение, цепочка маршрута", check_rescan_imaging),
                       ("Кабинет rescan, «Приёмы»: запись пациента появляется у врача за 20 с без обновления, итог создаёт следующий шаг", check_rescan_visits),
+                      ("Кабинет rescan, «Пациенты»: Мария К. получает план врача, запись в анамнез видна после обновления", check_rescan_patients),
                       ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral)]
             for title, check in checks:
                 failures = check(browser)
