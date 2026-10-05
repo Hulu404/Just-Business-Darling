@@ -204,7 +204,7 @@ class Stand:
 
     def tool_env(self) -> dict[str, str]:
         return {**base_env(self.image_mode), **self.values, "DEMO_STATE_DIR": str(self.state),
-                "DEMO_IMAGE_MODE": self.image_mode}
+                "DEMO_IMAGE_MODE": self.image_mode, "DEMO_GATEWAY_URL": APP_URL}
 
     def start(self) -> bool:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0

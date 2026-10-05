@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from stand_api import env, utf8_console
+from stand_api import GATEWAY, env, utf8_console
 
 try:
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover - depends on the machine
     sync_playwright = None
 from PIL import Image, ImageChops, ImageDraw
 
-APP = "http://127.0.0.1:8763"
+APP = GATEWAY
 PROTOTYPE = Path(__file__).resolve().parents[1] / "prototype" / "medmarshrut_product_prototype_v2.html"
 
 # 23 screens of the prototype, each in a role that has it in the menu (or reaches it from there).
