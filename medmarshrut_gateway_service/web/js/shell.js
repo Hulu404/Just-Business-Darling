@@ -55,13 +55,8 @@ export function renderShell(){
     <div class="sidefoot">Демо клиники «Линия здоровья».<br>Все пациенты, записи и цифры в прототипе вымышленные.<br><button data-action="reset">Сбросить демо</button></div>`;
   $('#topbar').innerHTML = `<div style="display:flex;align-items:center;gap:12px"><button class="mobilemenu" data-action="menu" aria-label="Меню">${icon('menu')}</button><strong>${safe(pageTitle())}</strong></div><div class="topright">${badge(roleName())}<span class="muted hidem" style="font-size:13px">Демо-режим</span></div>`;
 }
-const roleSelect = () => `<select id="role"><option value="patient" ${state.role === 'patient' ? 'selected' : ''}>Пациент</option><option value="staff" ${state.role === 'staff' ? 'selected' : ''}>Сотрудник клиники</option><option value="doctor" ${state.role === 'doctor' ? 'selected' : ''}>Врач</option>${partnerOptions()}</select>`;
-/* Клиники-партнёры с токеном на стенде — из /api/health; своя клиника окна видна и до ответа */
-function partnerOptions(){
-  const list = (health.data?.partner_clinics || []).slice();
-  if (state.role === 'partner' && !list.some(c => c.clinic_id === state.partnerClinic)) list.push({clinic_id:state.partnerClinic, name:state.partnerClinic});
-  return list.map(c => `<option value="partner:${safe(c.clinic_id)}" ${state.role === 'partner' && state.partnerClinic === c.clinic_id ? 'selected' : ''}>Партнёр: ${safe(c.name)}</option>`).join('');
-}
+/* В списке ролей только пациент и врач; окна сотрудника и партнёра открываются по адресу (#/staff/…, #/partner/…) */
+const roleSelect = () => `<select id="role"><option value="patient" ${state.role === 'patient' ? 'selected' : ''}>Пациент</option><option value="doctor" ${state.role === 'doctor' ? 'selected' : ''}>Врач</option>${['staff', 'partner'].includes(state.role) ? `<option value="${state.role}" selected>${roleName()}</option>` : ''}</select>`;
 export function render(){
   const fn = PAGES[state.page] || PAGES[HOME[state.role]];
   const html = sessionGate() || fn();

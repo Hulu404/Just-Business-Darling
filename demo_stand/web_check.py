@@ -203,8 +203,7 @@ def check_scenario(browser) -> list[str]:
     if not book_on_phone(page):
         page.close()
         return ["у пациента нет шага, на который можно записаться"]
-    page.select_option("#role", "staff")
-    page.wait_for_function("() => location.hash === '#/staff/inbox'")
+    page.goto(APP + "/#/staff/inbox")  # в списке ролей только пациент и врач
     page.wait_for_selector("#view:has-text('Демо-пациент')")
     if "Демо-пациент" not in page.inner_text("#view"):
         failures.append("координатор не видит обращение пациента")

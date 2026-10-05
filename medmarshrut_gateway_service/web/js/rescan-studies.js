@@ -3,6 +3,7 @@
 import { api } from './api.js';
 import { k, empty, head, load, redraw, rs, stateOf } from './rescan-ui.js';
 import { planButton, planCard } from './rescan-plan.js';
+import { casesBlock } from './rescan-cases.js';
 import { current } from './path-ui.js';
 import { state, ui } from './state.js';
 import { $, go, plural, safe, toast } from './ui.js';
@@ -127,7 +128,7 @@ function patientCard(st){
     body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>Ваше заключение, утверждённое объяснение и шаг${st.next?.step ? ' «' + safe(st.next.step) + '»' : ''}</b><small>Оценка модели пациенту не показывается.</small></div>`;
   } else body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>«Врач описывает сам»</b><small>Координатор свяжется с пациентом.</small></div>`;
   /* Ссылка открывает окно пациента (роль «пациент», раздел «Что на снимке») */
-  return `<div class="c-card"><div class="c-ch"><span><h2>Что увидит пациент</h2><span class="sub">в разделе «Что на снимке»</span></span></div><div class="c-msg">${body}</div><div class="c-act"><button class="c-lnk" type="button" data-jump="patient:imaging">Посмотреть глазами пациента</button></div></div>`;
+  return `<div class="c-card"><div class="c-ch"><span><h2>Что увидит пациент</h2><span class="sub">в разделе «Что на снимке»</span></span></div><div class="c-msg">${body}</div><div class="c-act"><button class="c-lnk" type="button" data-jump="patient:rsResults">Посмотреть глазами пациента</button></div></div>`;
 }
 
 /* ---------- Экран ---------- */
@@ -135,11 +136,11 @@ export function rsStudies(){
   return stateOf('studies', raw => {
     const list = ordered(raw), waiting = list.filter(s => s.status === 'awaiting_physician');
     const sub = waiting.length ? `Осталось разобрать: ${waiting.length}` : 'Все исследования разобраны';
-    if (!list.length) return head('Исследования', sub) + empty('Исследований нет', 'Когда пациент или клиника загрузит исследование, оно появится здесь.');
+    if (!list.length) return head('Исследования', sub) + empty('Исследований нет', 'Когда пациент или клиника загрузит исследование, оно появится здесь.') + casesBlock();
     if (!ui.rsStudy || !list.some(s => s.id === ui.rsStudy)) ui.rsStudy = list[0].id;
     if (det.id !== ui.rsStudy) queueMicrotask(() => { if (det.id !== ui.rsStudy) loadDetail(ui.rsStudy); });
     const tabs = list.map(s => `<button class="c-tab" type="button" data-action="rsStudyOpen" data-id="${safe(s.id)}" aria-pressed="${s.id === ui.rsStudy}" title="${safe(s.title)}">${k('scan', 18)}${safe(short(s.patient))}${s.status === 'awaiting_physician' ? '<span class="d" style="background:var(--c-amber)"></span>' : ''}</button>`).join('');
-    return head('Исследования', sub, `<div class="c-tabs" role="group" aria-label="Исследование">${tabs}</div>`) + detail(waiting);
+    return head('Исследования', sub, `<div class="c-tabs" role="group" aria-label="Исследование">${tabs}</div>`) + detail(waiting) + casesBlock();
   });
 }
 function detail(waiting){
