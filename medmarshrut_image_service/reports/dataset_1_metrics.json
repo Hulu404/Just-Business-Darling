@@ -1,0 +1,43 @@
+﻿{
+  "report_type": "model_evaluation",
+  "status": "not_computable",
+  "generated_on": "2026-10-03",
+  "input": {
+    "path": "D:\\Telegram\\dataset (1).ipynb.json",
+    "sha256": "f9fa64bf867e8dd68b0c30b39d224429554988d254d75e66c4e71f6c8cf83204",
+    "format": "Jupyter notebook JSON",
+    "size_bytes": 10498,
+    "cells": 2,
+    "embedded_patient_records": 0,
+    "embedded_dicom_images": 0,
+    "saved_cell_error": "NameError: name 'tqdm' is not defined"
+  },
+  "model": {
+    "status": "not_run",
+    "reason": "No approved ONNX model or model configuration was provided or found in the project."
+  },
+  "dataset": {
+    "status": "not_available",
+    "reason": "The supplied file contains Python code that expects a separate overview CSV under C:\\Users\\user\\Documents\\хакатон; that directory is absent. It does not contain image-level labels, predictions, or a usable manifest.",
+    "reference_source": "C:\\Users\\user\\Documents\\хакатон\\*overview*"
+  },
+  "evaluation": {
+    "unit": "image",
+    "evaluated_images": 0,
+    "evaluated_patients": 0,
+    "evaluated_institutions": 0,
+    "threshold": null,
+    "confusion_matrix": {"tp": null, "tn": null, "fp": null, "fn": null},
+    "sensitivity": null,
+    "specificity": null,
+    "precision": null,
+    "recall": null,
+    "brier_score": null,
+    "ece_10_bins": null,
+    "calibration_bins": null,
+    "subgroups": null,
+    "errors_by_study_type": null,
+    "external_validation": null,
+    "unavailable_reason": "Diagnostic metrics require de-identified DICOM images, verified reference labels, a patient-disjoint evaluation split, and predictions from the exact approved model version. None are present in the supplied notebook."
+  }
+}

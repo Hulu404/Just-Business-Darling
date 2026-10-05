@@ -1,0 +1,21 @@
+{
+  "version": "demo-stand-network-1",
+  "clinics": [
+    {"id": "clinic-central", "name": "Клиника «Линия здоровья», Центральный филиал", "network": "demo-stand", "active": true},
+    {"id": "clinic-partner-1", "name": "Диагностический центр на Лесной", "network": "demo-stand", "active": true},
+    {"id": "clinic-partner-2", "name": "Маммологический центр «Опора»", "network": "demo-stand", "active": true}
+  ],
+  "capabilities": [
+    {"clinic_id": "clinic-central", "study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-central", "study_type": "mr", "anatomy": "KNEE", "protocol_name": "MR_KNEE", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-central", "study_type": "mammography", "anatomy": "BREAST", "protocol_name": "MG_SCREENING", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-central", "study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-partner-1", "study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-partner-1", "study_type": "mr", "anatomy": "KNEE", "protocol_name": "MR_KNEE", "finding_code": "*", "approved": true},
+    {"clinic_id": "clinic-partner-2", "study_type": "mammography", "anatomy": "BREAST", "protocol_name": "MG_SCREENING", "finding_code": "*", "approved": true}
+  ],
+  "partnerships": [
+    {"clinic_a": "clinic-central", "clinic_b": "clinic-partner-1", "direction": "mutual", "active": true, "since": "2026-01-01T00:00:00+00:00"},
+    {"clinic_a": "clinic-central", "clinic_b": "clinic-partner-2", "direction": "mutual", "active": true, "since": "2026-01-01T00:00:00+00:00"}
+  ]
+}

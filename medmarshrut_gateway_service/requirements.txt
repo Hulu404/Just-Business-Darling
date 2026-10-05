@@ -1,0 +1,5 @@
+psycopg[binary]==3.3.6
+pydicom>=3.0,<4
+numpy>=2,<3
+Pillow>=11,<13
+anthropic>=0.105,<1

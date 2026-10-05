@@ -1,0 +1,27 @@
+{
+  "version": "demo-stand-rules-1",
+  "supported_protocols": [
+    {"study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD"},
+    {"study_type": "mr", "anatomy": "KNEE", "protocol_name": "MR_KNEE"},
+    {"study_type": "mammography", "anatomy": "BREAST", "protocol_name": "MG_SCREENING"},
+    {"study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA"}
+  ],
+  "rules": [
+    {"study_type": "xray", "anatomy": "CHEST", "protocol_name": "CHEST_PA",
+     "finding_code": "DEMO_XR_INFILTRATE", "approved": true,
+     "steps": [{"kind": "appointment", "description": "Приём терапевта в течение 24 часов"}]},
+    {"study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD",
+     "finding_code": "DEMO_CT_INFILTRATE", "approved": true,
+     "steps": [{"kind": "appointment", "description": "Приём терапевта в течение 24 часов"}]},
+    {"study_type": "ct", "anatomy": "CHEST", "protocol_name": "CHEST_STANDARD",
+     "finding_code": "DEMO_CT_NODULE", "approved": true,
+     "steps": [{"kind": "appointment", "description": "Консультация пульмонолога в течение 7 дней"}]},
+    {"study_type": "mr", "anatomy": "KNEE", "protocol_name": "MR_KNEE",
+     "finding_code": "DEMO_MR_MENISCUS", "approved": true,
+     "steps": [{"kind": "appointment", "description": "Приём травматолога-ортопеда в течение 14 дней"}]},
+    {"study_type": "mammography", "anatomy": "BREAST", "protocol_name": "MG_SCREENING",
+     "finding_code": "DEMO_MG_DENSITY", "approved": false,
+     "steps": [{"kind": "test", "description": "УЗИ молочных желёз"},
+               {"kind": "appointment", "description": "Приём маммолога"}]}
+  ]
+}

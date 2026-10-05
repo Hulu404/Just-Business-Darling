@@ -1,0 +1,20 @@
+{
+  "version": "demo-catalog-1",
+  "pharmacies": [
+    {"id": "pharm-central", "name": "Central Pharmacy", "network": "demo-network", "city": "Moscow", "active": true, "order_url_template": "https://central-pharm.demo/order/{order_id}"},
+    {"id": "pharm-north", "name": "North Pharmacy", "network": "demo-network", "city": "Moscow", "active": true, "order_url_template": "https://north-pharm.demo/checkout/{order_id}"},
+    {"id": "pharm-south", "name": "South Pharmacy", "network": "demo-network", "city": "Moscow", "active": true, "order_url_template": "https://south-pharm.demo/pay/{order_id}"}
+  ],
+  "medications": [
+    {"id": "med-amoxil-500-caps", "inn": "amoxicillin", "trade_name": "Amoxil", "form": "capsule", "strength": "500 mg", "atc_code": "J01CA04", "prescription_required": true, "active": true},
+    {"id": "med-amoxil-forte-500-caps", "inn": "amoxicillin", "trade_name": "Amoxil Forte", "form": "capsule", "strength": "500 mg", "atc_code": "J01CA04", "prescription_required": true, "active": true},
+    {"id": "med-hiconcil-500-caps", "inn": "amoxicillin", "trade_name": "Hiconcil", "form": "capsule", "strength": "500 mg", "atc_code": "J01CA04", "prescription_required": true, "active": true},
+    {"id": "med-panadol-500-tab", "inn": "paracetamol", "trade_name": "Panadol", "form": "tablet", "strength": "500 mg", "atc_code": "N02BE01", "prescription_required": false, "active": true},
+    {"id": "med-efferalgan-500-tab", "inn": "paracetamol", "trade_name": "Efferalgan", "form": "tablet", "strength": "500 mg", "atc_code": "N02BE01", "prescription_required": false, "active": true},
+    {"id": "med-nurofen-400-tab", "inn": "ibuprofen", "trade_name": "Nurofen", "form": "tablet", "strength": "400 mg", "atc_code": "M01AE01", "prescription_required": false, "active": true},
+    {"id": "med-brufen-400-tab", "inn": "ibuprofen", "trade_name": "Brufen", "form": "tablet", "strength": "400 mg", "atc_code": "M01AE01", "prescription_required": false, "active": true},
+    {"id": "med-losec-20-caps", "inn": "omeprazole", "trade_name": "Losec", "form": "capsule", "strength": "20 mg", "atc_code": "A02BC01", "prescription_required": true, "active": true},
+    {"id": "med-omez-20-caps", "inn": "omeprazole", "trade_name": "Omez", "form": "capsule", "strength": "20 mg", "atc_code": "A02BC01", "prescription_required": true, "active": true},
+    {"id": "med-vitd3-drops", "inn": "cholecalciferol", "trade_name": "Vigantol", "form": "drops", "strength": "15000 IU/ml", "atc_code": "A11CC05", "prescription_required": false, "active": true}
+  ]
+}

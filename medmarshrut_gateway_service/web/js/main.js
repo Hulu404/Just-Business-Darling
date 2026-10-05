@@ -1,0 +1,130 @@
+/* Запуск: адрес окна задаёт роль и экран (#/staff/case), сессия роли создаётся в шлюзе, состояние сервисов — из /api/health */
+import { createSession, getHealth, sessionExtras } from './api.js';
+import { ACTIONS, PAGES } from './actions.js';
+import { render, renderBanner, renderShell } from './shell.js';
+import { freshState, health, hooks, sessions, setState, state, ui } from './state.js';
+import { installPathActions, isPathPage, pathAppointments, pathCase, pathHome, pathInbox, pathPlan, pathScheduling, refreshPath } from './path-ui.js';
+import { installPathExtra, pathAnalytics, pathRules, refreshPathExtra } from './path-extra.js';
+import { imagingPage, installImagingActions, isImagingListPage, refreshImaging } from './imaging-ui.js';
+import { analyticsClinicBlock, documentsReferrals, incomingPage, installClinicActions, isClinicPage, partnersPage, referralPage, refreshClinic } from './clinic-ui.js';
+import { documents } from './pages/patient.js';
+import { RESCAN_PAGES, RS_PAGES, installRescanActions, isRescanPage, refreshRescan, setRescanRender } from './rescan-ui.js';
+import { PHONE_PAGES, PH_PAGES, installPhoneActions, isPhonePage, refreshPhone, setPhoneRender } from './rescan-phone.js';
+
+const ROLES = ['patient', 'staff', 'doctor', 'partner'];
+const DEFAULT_PARTNER = 'clinic-partner-1';
+const HEALTH_EVERY = 15000;
+Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointments,
+                      inbox:pathInbox, case:pathCase, scheduling:pathScheduling,
+                      rules:pathRules, analytics:pathAnalytics,
+                      imaging:imagingPage,
+                      partners:partnersPage, incoming:incomingPage, referral:referralPage,
+                      documents:() => documents() + documentsReferrals(),
+                      analytics:() => pathAnalytics() + analyticsClinicBlock(), ...RESCAN_PAGES, ...PHONE_PAGES});
+installPathActions(ACTIONS);
+installPathExtra(ACTIONS);
+installImagingActions(ACTIONS);
+installClinicActions(ACTIONS);
+installRescanActions(ACTIONS);
+installPhoneActions(ACTIONS);
+/* Перерисовка кабинета по приходу данных не сбрасывает фокус и курсор в поле */
+const rerender = () => {
+  const active = document.activeElement, id = active && active.id, at = active && active.selectionStart;
+  render();
+  const field = id && document.getElementById(id);
+  if (field && field !== active && ['INPUT', 'TEXTAREA'].includes(field.tagName)){ field.focus({preventScroll:true}); try { field.setSelectionRange(at, at); } catch (err){} }
+};
+setRescanRender(rerender);
+setPhoneRender(rerender);
+const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); refreshRescan(); refreshPhone(); };
+const sessionRequests = {};
+
+/* Окно клиники-партнёра хранит клинику в адресе: #/partner/incoming?clinic=clinic-partner-2 */
+function parseHash(){
+  const m = /^#\/([a-z]+)\/([A-Za-z]+)(?:\?clinic=([a-z0-9-]+))?$/.exec(location.hash);
+  if (!m || !ROLES.includes(m[1])) return null;
+  /* У врача только кабинет rescan: прежние адреса (#/doctor/reading, #/doctor/inbox) открывают стартовый экран */
+  /* У пациента только приложение rescan: прежние экраны (#/patient/plan, #/patient/imaging) открывают «Главную» */
+  const page = m[1] === 'doctor' && !RS_PAGES.includes(m[2]) ? 'rsToday' : m[1] === 'patient' && !PH_PAGES.includes(m[2]) ? 'rsHome' : m[2];
+  if (!Object.prototype.hasOwnProperty.call(PAGES, page)) return null;
+  return m[1] === 'partner' ? {role:m[1], page, partnerClinic:m[3] || DEFAULT_PARTNER} : {role:m[1], page};
+}
+const hashOf = () => `#/${state.role}/${state.page}${state.role === 'partner' ? '?clinic=' + (state.partnerClinic || DEFAULT_PARTNER) : ''}`;
+
+/* Сессия роли окна. Пока её нет, shell показывает заглушку; при ошибке — блок с «Повторить» */
+async function ensureSession(role){
+  if (role === 'partner'){
+    state.partnerClinic = state.partnerClinic || DEFAULT_PARTNER;
+    sessionExtras.partner = {clinic_id:state.partnerClinic};
+    /* Кука у роли партнёра одна: окно другой клиники открывает свою сессию заново */
+    if (sessions.partner?.status === 'ok' && sessions.partner.data?.clinic_id !== state.partnerClinic) delete sessions.partner;
+  }
+  const current = sessions[role];
+  if (current?.status === 'ok') return;
+  if (current?.status === 'loading') return sessionRequests[role];
+  sessions[role] = {status:'loading', data:null, message:''};
+  if (state.role === role) render();
+  sessionRequests[role] = (async () => { try {
+    /* Окно без сессии в памяти открывает свою: так первая загрузка не упирается в 401 */
+    sessions[role] = {status:'ok', data:await createSession(role), message:''};
+  } catch (err){
+    sessions[role] = {status:'error', data:null, message:'Не удалось открыть сессию. ' + err.message};
+  }
+  if (state.role === role) render(); })();
+  return sessionRequests[role];
+}
+
+/* Назад, вперёд и ручная правка адреса */
+function applyRoute(){
+  const route = parseHash();
+  if (route && (route.role !== state.role || route.page !== state.page || (route.partnerClinic || null) !== (state.role === 'partner' ? state.partnerClinic : null))){
+    Object.assign(state, route);
+    ui.mobileOpen = false; ui.modal = null;
+  }
+  /* Канонический адрес: нет маршрута или он нормализован (прежний экран врача → rsToday) */
+  if (location.hash !== hashOf()) history.replaceState(null, '', hashOf());
+  render();
+  window.scrollTo(0, 0);
+  ensureSession(state.role).then(refreshData);
+}
+
+/* go() из прототипа меняет экран сразу; адрес и сессия догоняют здесь */
+hooks.navigate = () => {
+  if (location.hash !== hashOf()) history.pushState(null, '', hashOf());
+  ensureSession(state.role).then(refreshData);
+};
+
+let lastHealth = '';
+async function refreshHealth(){
+  try {
+    Object.assign(health, {status:'ok', data:await getHealth(state.role), message:''});
+  } catch (err){
+    Object.assign(health, {status:'error', data:null, message:'Не удалось узнать состояние сервисов. ' + err.message});
+  }
+  const snapshot = JSON.stringify(health);
+  if (snapshot === lastHealth) return;
+  lastHealth = snapshot;
+  renderBanner();
+  renderShell();  // в списке ролей — клиники-партнёры из /api/health
+  if (state.page === 'services' && !ui.modal) render();
+  else if (isRescanPage()) ACTIONS.rsRender();  // «Настройки» и шрифт кабинета — из /api/health
+}
+
+ACTIONS.sessionRetry = () => { delete sessions[state.role]; ensureSession(state.role); };
+ACTIONS.healthRetry = () => { Object.assign(health, {status:'loading', data:null, message:''}); lastHealth = ''; render(); refreshHealth(); };
+
+setState(freshState());
+const start = parseHash();
+if (start) Object.assign(state, start);
+if (location.hash !== hashOf()) history.replaceState(null, '', hashOf());  // нормализуем адрес (прежний экран врача → rsToday)
+window.addEventListener('popstate', applyRoute);
+render();
+ensureSession(state.role).then(refreshData);
+refreshHealth();
+setInterval(refreshHealth, HEALTH_EVERY);
+setInterval(() => { if (isPathPage()) refreshPath(); }, HEALTH_EVERY);
+setInterval(refreshPathExtra, HEALTH_EVERY);
+setInterval(() => { if (isImagingListPage()) refreshImaging(); }, HEALTH_EVERY);
+setInterval(() => { if (isClinicPage() && state.page !== 'referral') refreshClinic(); }, HEALTH_EVERY);
+setInterval(() => { if (isRescanPage()) refreshRescan(true); }, HEALTH_EVERY);
+setInterval(() => { if (isPhonePage()) refreshPhone(true); }, HEALTH_EVERY);
