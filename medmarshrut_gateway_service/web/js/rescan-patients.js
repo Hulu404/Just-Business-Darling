@@ -20,9 +20,9 @@ const cards = {};
 export function patientNeeds(timer){ return timer && (ui.rsPlan || ui.rsAnam?.text) ? [] : ['patients', 'episodes', 'catalog', 'rules']; }
 
 /* Последнее обращение пациента; позиция на пути: 1 заключение, 2 шаг назначен, 3 записан, 4 пришёл */
-const latest = (episodes, ref) => episodes.filter(e => e.patient_ref === ref).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-const attention = e => !!e && (['manual_review', 'paused'].includes(e.status) || current(e)?.status === 'attended');
-const reached = e => !!e && (e.status === 'completed' || e.steps.some(s => ['attended', 'completed'].includes(s.status)));
+export const latest = (episodes, ref) => episodes.filter(e => e.patient_ref === ref).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+export const attention = e => !!e && (['manual_review', 'paused'].includes(e.status) || current(e)?.status === 'attended');
+export const reached = e => !!e && (e.status === 'completed' || e.steps.some(s => ['attended', 'completed'].includes(s.status)));
 function stage(e){
   if (!e) return 0;
   if (reached(e)) return 4;

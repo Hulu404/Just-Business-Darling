@@ -8,6 +8,7 @@ import { installStudyActions, rsStudies, studyNeeds } from './rescan-studies.js'
 import { installVisitActions, rsVisits, visitNeeds } from './rescan-visits.js';
 import { installPatientActions, patientNeeds, rsPatients } from './rescan-patients.js';
 import { installPlanActions } from './rescan-plan.js';
+import { installTodayActions, rsToday, todayNeeds } from './rescan-today.js';
 
 export const RS_PAGES = ['rsToday', 'rsStudies', 'rsPatients', 'rsVisits', 'rsSettings'];
 export const isRescanPage = () => state.role === 'doctor' && RS_PAGES.includes(state.page);
@@ -49,12 +50,13 @@ const LOADERS = {
   patients:() => api('GET', '/api/staff/patients', {role:'doctor'}).then(b => b.patients || []),
   episodes:() => api('GET', '/api/staff/episodes', {role:'doctor'}).then(b => b.episodes || []),
   visits:() => api('GET', '/api/doctor/visits', {role:'doctor'}).then(b => b.visits || []),
+  manual:() => api('GET', '/api/staff/studies/manual', {role:'doctor'}),
   assistant:() => api('GET', '/api/assistant/status', {role:'doctor'}),
   catalog:() => api('GET', '/api/catalog', {role:'doctor'}),
   rules:() => api('GET', '/api/staff/rules', {role:'doctor'})
 };
 /* Открытое исследование по таймеру не перечитывается: правка врача не должна пропасть */
-const NEEDS = {rsToday:() => ['studies'], rsStudies:studyNeeds, rsPatients:patientNeeds, rsVisits:visitNeeds, rsSettings:() => ['assistant']};
+const NEEDS = {rsToday:todayNeeds, rsStudies:studyNeeds, rsPatients:patientNeeds, rsVisits:visitNeeds, rsSettings:() => ['assistant']};
 export const rs = {};
 const inflight = {};
 let rerender = () => {};
@@ -101,31 +103,69 @@ export const head = (title, sub, right = '') => `<div class="c-h"><div><h1>${tit
 /* Полоса над кабинетом: логотип и тот же список ролей #role, что в боковой панели прежнего каркаса */
 export const modebar = roleSelect => `<div class="wm">${logo(22, true)}</div><div class="rolebox"><label for="role">Режим просмотра</label>${roleSelect}</div>`;
 
+/* ---------- Колокольчик: лента из новых исследований и журнала эпизодов ---------- */
+const FEED_DOT = {step_confirmed:'#1866A0', step_attended:'#06D6A0', outcome_confirmed:'#06D6A0'};
+const feedText = {step_confirmed:'записался', step_attended:'был на приёме', outcome_confirmed:'итог приёма внесён'};
+function feedEvents(){
+  const studies = rs.studies?.data || [], episodes = rs.episodes?.data || [], events = [];
+  studies.filter(s => s.status === 'awaiting_physician')
+    .forEach(s => events.push({title:'Новое исследование: ' + s.patient, sub:s.title, at:s.created_at, dot:'#FDAF04'}));
+  episodes.forEach(e => (e.audit_events || []).forEach(a => {
+    if (!FEED_DOT[a.event_type]) return;
+    const step = (e.steps || []).find(s => s.id === (a.details || {}).step_id);
+    events.push({title:e.patient + ', ' + feedText[a.event_type], sub:step ? step.description : e.title, at:a.occurred_at, dot:FEED_DOT[a.event_type]});
+  }));
+  return events.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 10);
+}
 function feedPanel(){
   if (!ui.rsFeed) return '';
-  return `<div class="c-feed" role="dialog" aria-label="Уведомления"><b style="font-size:14px">Уведомления</b>${empty('Лента пока пуста', 'Здесь появятся новые исследования, записи и визиты пациентов.')}</div>`;
+  const pending = (rs.studies?.status === 'loading' && !rs.studies.data) || (rs.episodes?.status === 'loading' && !rs.episodes.data) || (!rs.studies && !rs.episodes);
+  const events = feedEvents();
+  const body = pending ? '<div class="c-skel" style="min-height:48px"></div>'
+    : events.length ? events.map(e => `<div style="display:flex;gap:10px;font-size:12px"><span style="width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0;background:${e.dot}"></span><span><b style="font-weight:600;display:block">${safe(e.title)}</b><span style="color:#5B6370">${safe(e.sub)}</span></span></div>`).join('')
+    : empty('Лента пока пуста', 'Здесь появятся новые исследования, записи и визиты пациентов.');
+  return `<div class="c-feed" role="dialog" aria-label="Уведомления"><b style="font-size:14px">Уведомления</b>${body}</div>`;
 }
 function cabinet(body){
   const name = doctorName();
-  const rail = NAV.map(([id, ic, label]) => `<button class="c-ri" type="button" data-nav="${id}" aria-label="${label}" title="${label}"${state.page === id ? ' aria-current="page"' : ''}>${k(ic, 24)}</button>`).join('');
+  const fresh = (rs.studies?.data || []).filter(s => s.status === 'awaiting_physician').length;  // точка на колокольчике и «Исследованиях»
+  const dot = '<span class="bd"></span>';
+  const rail = NAV.map(([id, ic, label]) => `<button class="c-ri" type="button" data-nav="${id}" aria-label="${label}" title="${label}"${state.page === id ? ' aria-current="page"' : ''}>${k(ic, 24)}${id === 'rsStudies' && fresh ? dot : ''}</button>`).join('');
   return `<div id="clinic"><div class="c-app"><div class="c-logo">${logo(34)}</div>
     <div class="c-top"><div class="c-greet"><b>${greet()}, ${safe(name)}</b><span class="c-meta"><span>${k('cal', 14, 1.7)}${safe(today())}</span><span>${k('hosp', 14, 1.7)}Клиника «Линия здоровья»</span><span>${k('steth', 14, 1.7)}Врач</span><span class="demo">демо-стенд</span></span></div>
       <label class="c-search">${k('search', 18)}<input id="rsQuery" placeholder="Найти пациента" value="${safe(ui.rsQuery || '')}" aria-label="Найти пациента" autocomplete="off"></label>
-      <button class="c-ib" type="button" data-action="rsFeed" aria-label="Уведомления" aria-expanded="${ui.rsFeed ? 'true' : 'false'}">${k('bell', 22)}</button>
+      <button class="c-ib" type="button" data-action="rsFeed" aria-label="Уведомления" aria-expanded="${ui.rsFeed ? 'true' : 'false'}">${k('bell', 22)}${fresh ? dot : ''}</button>
       <span class="c-me" title="${safe(name)}" style="font-weight:600;color:var(--c-blue)">${safe(initials(name))}</span></div>
     <nav class="c-rail" aria-label="Разделы">${rail}<span class="c-sep"></span><button class="c-ri" type="button" data-nav="rsSettings" aria-label="Настройки" title="Настройки"${state.page === 'rsSettings' ? ' aria-current="page"' : ''}>${k('set', 24)}</button></nav>
     <section class="c-main">${feedPanel()}${body}</section></div></div>`;
 }
 
-/* ---------- Экраны. Пока каркас: заголовок и состояния источника; содержимое — в следующих циклах ---------- */
-const later = text => empty('Раздел собирается', text);
-function rsToday(){
-  return head('Сегодня', 'Новые исследования и пациенты, которым нужно ваше решение') +
-    stateOf('studies', list => list.length ? later('Плитки, новые исследования и поводы для внимания появятся здесь.') : empty('Новых исследований нет', 'Когда пациент или клиника загрузит исследование, оно появится здесь.'));
+/* ---------- «Настройки»: состояние трёх сервисов, режим снимков, ИИ-помощник, число клиник-партнёров ---------- */
+const MODE_LABEL = {'demo-scripted':'сценарный разбор, демо', 'model':'локальная модель', 'no-model':'без модели'};
+/* МИС, РИС, каналы пациентов и аптеки на стенде не подключены (решение владельца задания) */
+const NOT_CONNECTED = [['МИС клиники', 'Карта, назначения и визиты'], ['РИС и PACS', 'Исследования и протоколы'],
+  ['Каналы пациентов', 'Telegram, SMS, почта'], ['Аптеки-партнёры', 'Бронь и выдача по рецепту']];
+const setCard = (title, tone, label, desc) => `<div class="c-card"><b style="font-size:15px">${safe(title)}</b><span class="c-s ${tone}" style="align-self:flex-start;min-width:0">${safe(label)}</span><span style="font-size:12px;color:var(--c-fg2)">${safe(desc)}</span></div>`;
+function svcCard(title, key, desc){
+  const service = health.data?.services?.[key];
+  const [tone, label] = !service ? ['grey', 'нет данных'] : service.status === 'up' ? ['green', 'работает'] : ['red', 'недоступен'];
+  return setCard(title, tone, label, desc);
 }
+const healthError = () => `<div class="c-err" role="alert"><p>${safe(health.message)}</p><button class="c-btn sm" type="button" data-action="healthRetry">Повторить</button></div>`;
 function rsSettings(){
-  return head('Настройки', 'Что подключено на стенде') +
-    stateOf('assistant', () => later('Состояние сервисов, режим снимков и ИИ-помощник появятся здесь.'));
+  const intro = head('Настройки', 'Что подключено на стенде');
+  if (health.status === 'error') return intro + healthError();
+  if (health.status !== 'ok' || !health.data) return intro + skeleton(3);
+  const mode = MODE_LABEL[health.data.imaging_mode] || health.data.imaging_mode;
+  const partners = (health.data.partner_clinics || []).length;
+  return intro + stateOf('assistant', a => `<div class="c-g3">
+    ${svcCard('Сервис «Что на снимке?»', 'image', 'Приём снимков и проверка врачом')}
+    ${svcCard('Сервис маршрута', 'path', 'Правила клиники и следующий шаг')}
+    ${svcCard('Сервис клиники', 'clinic', 'Карта пациента, сеть, направления')}
+    ${setCard('Режим снимков', 'blue', mode, 'Как стенд разбирает исследования')}
+    ${setCard('ИИ-помощник', a.enabled ? 'green' : 'grey', a.enabled ? 'включён' : 'выключен: нет ключа API', 'Формулировка врачу, пояснение пациенту')}
+    ${setCard('Клиники-партнёры', partners ? 'green' : 'grey', String(partners), 'Запись к специалистам')}
+    ${NOT_CONNECTED.map(([title, desc]) => setCard(title, 'grey', 'не подключено на стенде', desc)).join('')}</div>`);
 }
 const SCREENS = {rsToday, rsStudies, rsPatients, rsVisits, rsSettings};
 export const RESCAN_PAGES = Object.fromEntries(RS_PAGES.map(id => [id, () => {
@@ -137,12 +177,14 @@ export const RESCAN_PAGES = Object.fromEntries(RS_PAGES.map(id => [id, () => {
 /* ---------- Действия ---------- */
 export function installRescanActions(ACTIONS){
   ACTIONS.rsRetry = d => { rs[d.key] = {status:'loading', data:null, message:''}; rerender(); load(d.key); };
-  ACTIONS.rsFeed = () => { ui.rsFeed = !ui.rsFeed; rerender(); };
+  /* Колокольчик работает на любом экране: при открытии подтянуть источники ленты */
+  ACTIONS.rsFeed = () => { ui.rsFeed = !ui.rsFeed; if (ui.rsFeed){ load('studies'); load('episodes'); } rerender(); };
   ACTIONS.rsRender = () => rerender();
   installStudyActions(ACTIONS);
   installVisitActions(ACTIONS);
   installPatientActions(ACTIONS);
   installPlanActions(ACTIONS);
+  installTodayActions(ACTIONS);
   /* Поиск пациента: текст живёт в ui.rsQuery, в «Пациентах» список фильтруется сразу, Enter открывает «Пациентов» */
   document.addEventListener('input', e => { if (e.target.id !== 'rsQuery') return; ui.rsQuery = e.target.value; if (state.page === 'rsPatients') rerender(); });
   document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'rsQuery' && state.page !== 'rsPatients') go('rsPatients'); });

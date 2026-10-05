@@ -133,6 +133,35 @@ def check_widths(browser) -> list[str]:
     return failures
 
 
+def check_rescan_today(browser) -> list[str]:
+    """rescan cabinet, «Сегодня» on a clean stand: Игорь С. is in «Новые исследования», Мария К. and Сергей Т. in
+    «Требуют внимания», Елена П. in «Приёмы»; the bell feed lists a new study. Runs before the scenarios that
+    change patient state (bookings, outcomes, the plan for Мария К.)."""
+    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    errors = watch(page)
+    failures = []
+    page.goto(APP + "/#/doctor/rsToday")
+    wait_ready(page)
+    page.wait_for_selector("#clinic .c-att, #clinic .c-g2 .c-empty")
+    if "Игорь" not in page.inner_text("#clinic .c-g2 > .c-card"):
+        failures.append("Игоря С. нет в «Новых исследованиях»")
+    attention = page.inner_text("#clinic .c-g2 .c-col")
+    for who in ("Мария", "Сергей"):
+        if who not in attention:
+            failures.append(f"{who} нет в «Требуют внимания»")
+    page.click("[data-action=rsFeed]")
+    page.wait_for_selector("#clinic .c-feed")
+    if "Новое исследование" not in page.inner_text("#clinic .c-feed"):
+        failures.append("в ленте колокольчика нет нового исследования")
+    open_screen(page, "doctor", "rsVisits")
+    if "Елена" not in page.inner_text("#clinic .c-tbl"):
+        failures.append("Елены П. нет в «Приёмах»")
+    if errors:
+        failures.append("ошибки в консоли: " + "; ".join(errors))
+    page.close()
+    return failures
+
+
 def check_scenario(browser) -> list[str]:
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     errors = watch(page)
@@ -494,6 +523,7 @@ def main() -> int:
             browser = p.chromium.launch()
             checks = [("Все экраны во всех ролях без ошибок консоли и CSP; адрес переживает обновление, «назад» и переходы с карты сервисов", check_screens),
                       ("Нет горизонтальной прокрутки при 390, 820, 1280 и 1680 px", check_widths),
+                      ("Кабинет rescan, «Сегодня» на чистом стенде: Игорь С. в «Новых», Мария К. и Сергей Т. в «Требуют внимания», Елена П. в «Приёмах»", check_rescan_today),
                       ("Сквозной сценарий: запись → итог врача и рецепт → второй этап → бронь в аптеке", check_scenario),
                       ("Два окна с разными ролями не мешают друг другу", check_two_windows),
                       ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging),
