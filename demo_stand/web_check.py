@@ -17,9 +17,10 @@ PROTOTYPE = Path(__file__).resolve().parents[1] / "prototype" / "medmarshrut_pro
 
 # 23 screens of the prototype, each in a role that has it in the menu (or reaches it from there).
 SCREENS = [
-    ("patient", "home"), ("patient", "intake"), ("patient", "review"), ("patient", "result"), ("patient", "plan"),
-    ("patient", "imaging"), ("patient", "appointments"), ("patient", "messages"), ("patient", "pharmacy"),
-    ("patient", "documents"),
+    # rescan patient app (task 13): the only patient screens after the switch-over
+    ("patient", "rsHome"), ("patient", "rsReport"), ("patient", "rsResults"), ("patient", "rsCare"),
+    ("patient", "rsCalendar"), ("patient", "rsBook"), ("patient", "rsStep"), ("patient", "rsVisits"),
+    ("patient", "rsProfile"),
     ("staff", "inbox"), ("staff", "case"), ("staff", "scheduling"), ("staff", "requests"), ("staff", "comms"),
     ("staff", "partners"), ("staff", "pharmacyAdmin"), ("staff", "rules"), ("staff", "analytics"),
     ("patient", "services"), ("staff", "services"),
@@ -34,7 +35,8 @@ MAX_DIFF = 0.01
 COMPARE = [s for s in SCREENS if s[1] not in {"services", "home", "plan", "appointments", "inbox", "case", "scheduling",
                                              "imaging", "reading", "study", "review", "rules", "analytics", "doctor",
                                              "partners", "documents", "incoming",
-                                             "rsToday", "rsStudies", "rsPatients", "rsVisits", "rsSettings"}]
+                                             "rsToday", "rsStudies", "rsPatients", "rsVisits", "rsSettings"}
+           and s[0] != "patient"]
 # Intentional differences. Masked areas are painted over in both screenshots before comparing.
 MASKS = [".brand small"]  # sidebar subtitle: «Демо-стенд» instead of «Прототип · версия 2»
 INTENTIONAL = [
@@ -45,6 +47,7 @@ INTENTIONAL = [
     "создание маршрута выключено до задания 07",
     "«Партнёры», «Документы» и кабинет клиники-партнёра работают на сервисе клиники: без выдуманных чисел (не сравниваются)",
     "кабинет врача rescan (rs*) сделан по другому образцу, prototype/rescan-app-standalone.html (не сравнивается)",
+    "приложение пациента rescan (rs*) — мобильный сайт по тому же образцу (не сравнивается)",
 ]
 CSP_PROBE = ("window.__mmCsp = [];"
              "document.addEventListener('securitypolicyviolation', e => window.__mmCsp.push(e.violatedDirective + ' ' + e.blockedURI));")
@@ -80,7 +83,7 @@ def check_screens(browser) -> list[str]:
     failures = []
     page.goto(APP + "/")
     wait_ready(page)
-    if not page.url.endswith("#/patient/home"):
+    if not page.url.endswith("#/patient/rsHome"):
         failures.append(f"стартовый адрес {page.url}")
     for role, name in SCREENS:
         before = len(errors)
@@ -123,6 +126,13 @@ def check_screens(browser) -> list[str]:
         wait_ready(page)
         if page.evaluate("() => location.hash") != "#/doctor/rsToday" or not page.query_selector("#clinic"):
             failures.append(f"прежний адрес #/doctor/{old} не открыл кабинет: " + page.evaluate("() => location.hash"))
+    # прежние адреса пациента открывают «Главную» приложения
+    for old in ("plan", "imaging"):
+        page.evaluate(f"location.hash = '#/patient/{old}'")
+        page.reload()
+        wait_ready(page)
+        if page.evaluate("() => location.hash") != "#/patient/rsHome" or not page.query_selector(".ph .ptabs"):
+            failures.append(f"прежний адрес #/patient/{old} не открыл приложение: " + page.evaluate("() => location.hash"))
     page.close()
     return failures
 
@@ -172,17 +182,27 @@ def check_rescan_today(browser) -> list[str]:
     return failures
 
 
+def book_on_phone(page) -> bool:
+    """«Запись» in the patient app: open the first step that waits for booking, take the first free time, book."""
+    if not page.query_selector(".ph [data-action=phOpenStep]"):
+        return False
+    page.click(".ph .pgrid [data-action=phOpenStep] >> nth=0")
+    page.wait_for_selector(".ph [data-action=phSlot]", timeout=10000)
+    page.click(".ph [data-action=phSlot] >> nth=0")
+    page.click(".ph [data-action=phBook]:not([disabled])")
+    page.wait_for_selector("#phDone:has-text('Вы записаны')", timeout=20000)
+    return True
+
+
 def check_scenario(browser) -> list[str]:
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     errors = watch(page)
-    page.goto(APP + "/#/patient/plan")
+    page.goto(APP + "/#/patient/rsBook")
     wait_ready(page)
-    page.click('[data-action=pathChoose] >> nth=0')
-    page.wait_for_function("() => location.hash === '#/patient/appointments'")
-    page.wait_for_selector("[data-action=pathBook]")
-    page.click("[data-action=pathBook] >> nth=0")
-    page.wait_for_selector(".note:has-text('Вы записаны')")
     failures = []
+    if not book_on_phone(page):
+        page.close()
+        return ["у пациента нет шага, на который можно записаться"]
     page.select_option("#role", "staff")
     page.wait_for_function("() => location.hash === '#/staff/inbox'")
     page.wait_for_selector("#view:has-text('Демо-пациент')")
@@ -197,7 +217,7 @@ def check_scenario(browser) -> list[str]:
 def check_two_windows(browser) -> list[str]:
     context = browser.new_context(viewport={"width": 1280, "height": 900})
     patient, staff = context.new_page(), context.new_page()
-    patient.goto(APP + "/#/patient/plan")
+    patient.goto(APP + "/#/patient/rsHome")
     staff.goto(APP + "/#/staff/inbox")
     wait_ready(patient)
     wait_ready(staff)
@@ -207,12 +227,13 @@ def check_two_windows(browser) -> list[str]:
     wait_ready(staff)
     failures = []
     for page, role, badge in ((patient, "patient", "Пациент"), (staff, "staff", "Клиника")):
-        if page.eval_on_selector("#role", "e => e.value") != role or badge not in page.inner_text("#topbar"):
+        # у пациента вместо шапки прототипа полоса rescan: роль окна видна в списке ролей
+        if page.eval_on_selector("#role", "e => e.value") != role or (role == "staff" and badge not in page.inner_text("#topbar")):
             failures.append(f"окно {role} показывает чужую роль")
         session = page.evaluate("role => fetch('/api/session', {headers:{'X-MM-Role':role}}).then(r => r.json())", role)
         if session.get("role") != role:
             failures.append(f"окно {role}: сессия {session}")
-    open_screen(patient, "patient", "imaging")
+    open_screen(patient, "patient", "rsResults")
     staff.click("[data-nav=requests]")
     wait_ready(staff)
     if staff.eval_on_selector("#role", "e => e.value") != "staff" or patient.eval_on_selector("#role", "e => e.value") != "patient":
@@ -229,9 +250,9 @@ def check_rescan_imaging(browser) -> list[str]:
     patient, doctor = context.new_page(), context.new_page()
     patient_errors, doctor_errors = watch(patient), watch(doctor)
     failures = []
-    patient.goto(APP + "/#/patient/imaging")
+    patient.goto(APP + "/#/patient/rsResults")
     wait_ready(patient)
-    patient.click("[data-action=uploadOpen]")
+    patient.click(".ph .wbtn[data-action=phUpload]")
     if "Рентгенография" not in patient.inner_text("#upKind"):
         failures.append("в окне загрузки нет рентгенографии")
     patient.click("[data-action=uploadKit]")
@@ -240,7 +261,7 @@ def check_rescan_imaging(browser) -> list[str]:
     patient.select_option("#upKind", "ct_general")
     patient.check("#upConsent")
     patient.click("[data-action=upload]")
-    patient.wait_for_selector("#view .panel:has-text('Ждёт врача')", timeout=70000)
+    patient.wait_for_selector("#view .mrow:has-text('Ждёт врача')", timeout=70000)
     doctor.goto(APP + "/#/doctor/rsStudies")
     wait_ready(doctor)
     job = doctor.evaluate("""async () => {
@@ -277,7 +298,9 @@ def check_rescan_imaging(browser) -> list[str]:
     if not planned or planned not in doctor.inner_text("#clinic .c-dec"):
         failures.append(f"после подтверждения шаг не совпал с предпросмотром «{planned}»")
     patient.reload()
-    patient.wait_for_selector("#view .panel:has-text('Подтверждено врачом') img.studyimg[src^='blob:']", timeout=20000)
+    patient.wait_for_selector("#view .mrow:has-text('Подтверждено врачом')", timeout=20000)
+    patient.click("#view .mrow:has-text('Подтверждено врачом') >> nth=0")
+    patient.wait_for_selector("#view .shot img.studyimg[src^='blob:']", timeout=20000)
     for word in ("оценка", "1.2.826"):
         if word in patient.inner_text("#view"):
             failures.append(f"пациенту видно «{word}»")
@@ -298,15 +321,11 @@ def check_rescan_visits(browser) -> list[str]:
     wait_ready(doctor)
     rows = "() => [...document.querySelectorAll('#clinic .c-tbl tbody tr[data-step]')].map(r => r.dataset.step)"
     before = doctor.evaluate(rows)
-    patient.goto(APP + "/#/patient/plan")
+    patient.goto(APP + "/#/patient/rsBook")
     wait_ready(patient)
-    if not patient.query_selector("[data-action=pathChoose]"):
+    if not book_on_phone(patient):
         context.close()
         return ["у пациента нет шага, на который можно записаться"]
-    patient.click("[data-action=pathChoose] >> nth=0")
-    patient.wait_for_selector("[data-action=pathBook]")
-    patient.click("[data-action=pathBook] >> nth=0")
-    patient.wait_for_selector(".note:has-text('Вы записаны')")
     try:
         doctor.wait_for_function(f"() => ({rows})().some(s => !{before!r}.includes(s))", timeout=20000)
     except PlaywrightError:
@@ -325,7 +344,7 @@ def check_rescan_visits(browser) -> list[str]:
     doctor.fill("#rsOutCustom", planned)
     doctor.click("[data-action=rsOutcomeSave]")
     doctor.wait_for_selector("#rsOutcome", state="detached", timeout=20000)
-    patient.goto(APP + "/#/patient/plan")
+    patient.goto(APP + "/#/patient/rsHome")
     wait_ready(patient)
     try:
         patient.wait_for_selector(f"#view:has-text('{planned}')", timeout=10000)

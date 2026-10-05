@@ -9,6 +9,7 @@ import { imagingPage, installImagingActions, isImagingListPage, refreshImaging }
 import { analyticsClinicBlock, documentsReferrals, incomingPage, installClinicActions, isClinicPage, partnersPage, referralPage, refreshClinic } from './clinic-ui.js';
 import { documents } from './pages/patient.js';
 import { RESCAN_PAGES, RS_PAGES, installRescanActions, isRescanPage, refreshRescan, setRescanRender } from './rescan-ui.js';
+import { PHONE_PAGES, PH_PAGES, installPhoneActions, isPhonePage, refreshPhone, setPhoneRender } from './rescan-phone.js';
 
 const ROLES = ['patient', 'staff', 'doctor', 'partner'];
 const DEFAULT_PARTNER = 'clinic-partner-1';
@@ -19,20 +20,23 @@ Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointment
                       imaging:imagingPage,
                       partners:partnersPage, incoming:incomingPage, referral:referralPage,
                       documents:() => documents() + documentsReferrals(),
-                      analytics:() => pathAnalytics() + analyticsClinicBlock(), ...RESCAN_PAGES});
+                      analytics:() => pathAnalytics() + analyticsClinicBlock(), ...RESCAN_PAGES, ...PHONE_PAGES});
 installPathActions(ACTIONS);
 installPathExtra(ACTIONS);
 installImagingActions(ACTIONS);
 installClinicActions(ACTIONS);
 installRescanActions(ACTIONS);
+installPhoneActions(ACTIONS);
 /* Перерисовка кабинета по приходу данных не сбрасывает фокус и курсор в поле */
-setRescanRender(() => {
+const rerender = () => {
   const active = document.activeElement, id = active && active.id, at = active && active.selectionStart;
   render();
   const field = id && document.getElementById(id);
   if (field && field !== active && ['INPUT', 'TEXTAREA'].includes(field.tagName)){ field.focus({preventScroll:true}); try { field.setSelectionRange(at, at); } catch (err){} }
-});
-const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); refreshRescan(); };
+};
+setRescanRender(rerender);
+setPhoneRender(rerender);
+const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); refreshRescan(); refreshPhone(); };
 const sessionRequests = {};
 
 /* Окно клиники-партнёра хранит клинику в адресе: #/partner/incoming?clinic=clinic-partner-2 */
@@ -40,7 +44,8 @@ function parseHash(){
   const m = /^#\/([a-z]+)\/([A-Za-z]+)(?:\?clinic=([a-z0-9-]+))?$/.exec(location.hash);
   if (!m || !ROLES.includes(m[1])) return null;
   /* У врача только кабинет rescan: прежние адреса (#/doctor/reading, #/doctor/inbox) открывают стартовый экран */
-  const page = m[1] === 'doctor' && !RS_PAGES.includes(m[2]) ? 'rsToday' : m[2];
+  /* У пациента только приложение rescan: прежние экраны (#/patient/plan, #/patient/imaging) открывают «Главную» */
+  const page = m[1] === 'doctor' && !RS_PAGES.includes(m[2]) ? 'rsToday' : m[1] === 'patient' && !PH_PAGES.includes(m[2]) ? 'rsHome' : m[2];
   if (!Object.prototype.hasOwnProperty.call(PAGES, page)) return null;
   return m[1] === 'partner' ? {role:m[1], page, partnerClinic:m[3] || DEFAULT_PARTNER} : {role:m[1], page};
 }
@@ -122,3 +127,4 @@ setInterval(refreshPathExtra, HEALTH_EVERY);
 setInterval(() => { if (isImagingListPage()) refreshImaging(); }, HEALTH_EVERY);
 setInterval(() => { if (isClinicPage() && state.page !== 'referral') refreshClinic(); }, HEALTH_EVERY);
 setInterval(() => { if (isRescanPage()) refreshRescan(true); }, HEALTH_EVERY);
+setInterval(() => { if (isPhonePage()) refreshPhone(true); }, HEALTH_EVERY);

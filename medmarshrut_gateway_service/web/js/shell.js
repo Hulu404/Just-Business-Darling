@@ -4,18 +4,19 @@ import { icon } from './icons.js';
 import { appointments, documents, home, intake, messages, pharmacy, plan, result, review } from './pages/patient.js';
 import { services } from './pages/services.js';
 import { isRescanPage, modebar } from './rescan-ui.js';
+import { isPhonePage } from './rescan-phone.js';
 import { analytics, comms, inbox, pharmacyAdmin, requests, rules, scheduling } from './pages/staff.js';
 import { health, sessions, state, ui } from './state.js';
 import { $, badge, errorNote, loadingCards, renderModal, safe, serviceBanner } from './ui.js';
 
 /* ---------- Каркас: меню, шапка, отрисовка ---------- */
 export const NAVS = {
-  patient:[['home','home','Главная'],['plan','route','Мой план'],['imaging','scan','Что на снимке'],['appointments','calendar','Записи'],['messages','message','Сообщения'],['pharmacy','pharmacy','Аптека'],['documents','doc','Документы']],
+  patient:[['rsHome','home','Главная'],['rsCare','pharmacy','Лечение'],['rsCalendar','calendar','Календарь'],['rsBook','route','Запись'],['rsProfile','doc','Профиль']],
   staff:[['inbox','inbox','Обращения'],['scheduling','clock','Запись и сопровождение'],['requests','doctor','Связь с врачами'],['comms','message','Связь с пациентами'],['partners','link','Партнёры'],['pharmacyAdmin','pharmacy','Аптека и заказы'],['rules','sliders','Маршруты и правила'],['analytics','bars','Аналитика']],
   doctor:[['rsToday','home','Сегодня'],['rsStudies','scan','Исследования'],['rsPatients','route','Пациенты'],['rsVisits','calendar','Приёмы'],['rsSettings','sliders','Настройки']],
   partner:[['incoming','inbox','Входящие направления']]
 };
-export const HOME = {patient:'home', staff:'inbox', doctor:'rsToday', partner:'incoming'};
+export const HOME = {patient:'rsHome', staff:'inbox', doctor:'rsToday', partner:'incoming'};
 export const roleName = () => state.role === 'patient' ? 'Пациент' : state.role === 'staff' ? 'Клиника' : state.role === 'partner' ? 'Клиника-партнёр' : 'Врач';
 export function navCount(id){
   if (state.role === 'patient'){
@@ -36,7 +37,7 @@ export function pageTitle(){
 }
 export function renderShell(){
   /* Кабинет rescan: прежние боковая панель и шапка скрыты, на месте шапки — полоса с логотипом и тем же #role */
-  if (isRescanPage()){
+  if (isRescanPage() || isPhonePage()){
     $('#sidebar').className = 'sidebar';
     $('#sidebar').innerHTML = '';
     $('#topbar').className = 'modebar';
@@ -65,6 +66,7 @@ export function render(){
   const fn = PAGES[state.page] || PAGES[HOME[state.role]];
   const html = sessionGate() || fn();
   document.body.classList.toggle('m-clinic', isRescanPage());
+  document.body.classList.toggle('m-phone', isPhonePage());
   renderShell();
   renderBanner();
   $('#view').innerHTML = html;

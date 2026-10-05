@@ -128,8 +128,10 @@ async function sendStudy(run, success){
   try { await run(); closeModal(); toast(success); }
   catch (err){ toast(err.message); }
   finally { data.busy = false; document.querySelectorAll('[data-action=upload],[data-action=uploadKitSend]').forEach(b => { b.disabled = false; }); }
+  if (uploadHooks.after()) return;  // приложение пациента rescan само перечитывает «Результаты»
   if (state.page === 'imaging') await refreshImaging(); else { state.role = 'patient'; go('imaging'); }
 }
+export const uploadHooks = {after:() => false};
 export function installImagingActions(actions){
   actions.imagingRetry = () => refreshImaging();
   actions.uploadOpen = () => { state.role = 'patient'; go('imaging'); uploadModal(); };
