@@ -5,7 +5,6 @@ import { api } from './api.js';
 import { health, sessions, state, ui } from './state.js';
 import { go, safe } from './ui.js';
 import { installStudyActions, rsStudies, studyNeeds } from './rescan-studies.js';
-import { installCaseActions } from './rescan-cases.js';
 import { installVisitActions, rsVisits, visitNeeds } from './rescan-visits.js';
 import { installPatientActions, patientNeeds, rsPatients } from './rescan-patients.js';
 import { installPlanActions } from './rescan-plan.js';
@@ -182,7 +181,6 @@ export function installRescanActions(ACTIONS){
   ACTIONS.rsFeed = () => { ui.rsFeed = !ui.rsFeed; if (ui.rsFeed){ load('studies'); load('episodes'); } rerender(); };
   ACTIONS.rsRender = () => rerender();
   installStudyActions(ACTIONS);
-  installCaseActions(ACTIONS);
   installVisitActions(ACTIONS);
   installPatientActions(ACTIONS);
   installPlanActions(ACTIONS);
