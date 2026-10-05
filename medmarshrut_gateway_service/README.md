@@ -82,6 +82,7 @@ python .\medmarshrut_gateway_service\service.py
 | `GET /api/partner/queue`, `GET /api/partner/referrals` | партнёр | очередь и направления с токеном клиники-партнёра |
 | `GET /api/partner/patients/{id}/card` | партнёр | карта ровно в том виде, в каком её отдал сервис клиники |
 | `POST /api/partner/referrals/{id}/{accept\|reject\|complete}` | партнёр | `{"note"?}`, `actor` из сессии; в сервис пути ничего не уходит |
+| `GET /api/patient/episodes` | пациент | свои обращения с шагами плана и `appointments` — записи по расписанию своей клиники (эпизод, шаг, время, статус, специалист, место, формат); запись у партнёра в список не попадает |
 | `GET /api/patient/documents` | пациент | свои направления: клиника, причина, статус |
 | `GET /api/assistant/status` | все четыре | `{"enabled"}`: есть ли у шлюза ключ API помощника |
 | `POST /api/doctor/studies/{id}/assistant/rewrite` | врач | `{"finding_code", "text"}` → `{"suggestion"}`; только для исследования, которое ждёт врача; ничего не сохраняет |

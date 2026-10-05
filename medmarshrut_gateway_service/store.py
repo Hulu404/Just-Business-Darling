@@ -298,6 +298,16 @@ class GatewayStore:
             row = cur.fetchone()
         return {"specialist": row[0], "place": row[1], "format": row[2]} if row else None
 
+    def patient_appointments(self, patient_ref: str) -> list[dict]:
+        """Записи пациента в расписании своей клиники: время, статус, специалист, место и формат."""
+        with self.transaction(read_only=True) as cur:
+            cur.execute("""SELECT a.episode_id, a.step_id, a.starts_at, a.status, sl.specialist, a.place, a.format
+                           FROM appointments a LEFT JOIN slots sl ON sl.id=a.slot_id
+                           WHERE a.patient_ref=%s ORDER BY a.starts_at""", (patient_ref,))
+            rows = cur.fetchall()
+        return [{"episode_id": r[0], "step_id": r[1], "starts_at": r[2].isoformat(), "status": r[3],
+                 "specialist": r[4], "place": r[5], "format": r[6]} for r in rows]
+
     def appointment_for_step(self, episode_id: str, step_id: str) -> dict | None:
         with self.transaction(read_only=True) as cur:
             cur.execute("""SELECT id, starts_at, status FROM appointments

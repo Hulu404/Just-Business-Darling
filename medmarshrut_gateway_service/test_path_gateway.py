@@ -28,6 +28,13 @@ class FakeStore:
     def appointment_detail(self, episode_id, step_id):
         return self.appointments.get(step_id)
 
+    def patient_appointments(self, patient_ref):
+        rows = [{"patient_ref": "demo-patient-1", "episode_id": "own-1", "step_id": "step-1", "status": "confirmed",
+                 "starts_at": "2026-01-02T10:00:00+00:00", "specialist": "Терапевт", "place": "Каб. 214", "format": "Очно"},
+                {"patient_ref": "other-patient", "episode_id": "other-1", "step_id": "step-1", "status": "confirmed",
+                 "starts_at": "2026-01-03T10:00:00+00:00", "specialist": "Кардиолог", "place": "Каб. 101", "format": "Очно"}]
+        return [{k: v for k, v in r.items() if k != "patient_ref"} for r in rows if r["patient_ref"] == patient_ref]
+
     def explanation(self, *_):
         return {"seen": "Врач подтвердил находку", "means": "Обсудите её на приёме"}
 
@@ -75,6 +82,16 @@ class PathGatewayTests(GatewayTestCase):
         encoded = json.dumps(body)
         for forbidden in ("confidence", "model", "audit_events", "physician_id", "other-patient"):
             self.assertNotIn(forbidden, encoded)
+
+    def test_patient_appointments_are_own_only(self):
+        self.login("patient")
+        status, _, body = self.call("GET", "/api/patient/episodes", role="patient")
+        self.assertEqual(status, 200, body)
+        self.assertEqual([(a["episode_id"], a["place"], a["specialist"]) for a in body["appointments"]],
+                         [("own-1", "Каб. 214", "Терапевт")])
+        for role in ("staff", "doctor"):
+            self.login(role)
+            self.assertEqual(self.call("GET", "/api/patient/episodes", role=role)[0], 403)
 
     def test_patient_get_other_episode_is_404(self):
         self.login("patient")

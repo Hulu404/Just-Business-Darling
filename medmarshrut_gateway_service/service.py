@@ -486,7 +486,8 @@ class Gateway:
             view["stage"] = self._episode_stage(raw)
             view["stage_labels"] = ["Заключение", "Рекомендация", "Запись", "Приём"]
             items.append(view)
-        return 200, {"episodes": items}
+        # Записи по расписанию клиники: место и специалист переживают обновление страницы (задание 13)
+        return 200, {"episodes": items, "appointments": self.data_store().patient_appointments(ctx.session.patient_ref)}
 
     @staticmethod
     def _episode_stage(raw: dict) -> int:
