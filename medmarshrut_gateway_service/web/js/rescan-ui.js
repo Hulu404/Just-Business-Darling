@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { health, sessions, state, ui } from './state.js';
 import { go, safe } from './ui.js';
+import { installStudyActions, rsStudies, studyNeeds } from './rescan-studies.js';
 
 export const RS_PAGES = ['rsToday', 'rsStudies', 'rsPatients', 'rsVisits', 'rsSettings'];
 export const isRescanPage = () => state.role === 'doctor' && RS_PAGES.includes(state.page);
@@ -18,7 +19,8 @@ const KI = {
   bell:'M12 6.4v3.3M12 2c-3.7 0-6.6 3-6.6 6.6v2.1c0 .7-.3 1.7-.6 2.3l-1.3 2.1c-.8 1.3-.2 2.8 1.2 3.3 4.7 1.6 9.8 1.6 14.5 0 1.3-.4 1.9-2 1.2-3.3l-1.3-2.1c-.4-.6-.6-1.6-.6-2.3V8.6C18.6 5 15.6 2 12 2zM15.3 19c0 1.8-1.5 3.3-3.3 3.3-.9 0-1.7-.4-2.3-1-.6-.6-1-1.4-1-2.3',
   hosp:'M2 22h20M3 22V6c0-2 1-3 3-3h12c2 0 3 1 3 3v16M9 22v-4h6v4M12 7v6M9 10h6',
   steth:'M6 3H5a2 2 0 0 0-2 2v4a5 5 0 0 0 10 0V5a2 2 0 0 0-2-2h-1M8 14v1a6 6 0 0 0 12 0v-2M20 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
-  scan:'M2 9V6.5C2 4 4 2 6.5 2H9M15 2h2.5C20 2 22 4 22 6.5V9M22 16v1.5c0 2.5-2 4.5-4.5 4.5H16M9 22H6.5C4 22 2 20 2 17.5V15M7 12h10'
+  scan:'M2 9V6.5C2 4 4 2 6.5 2H9M15 2h2.5C20 2 22 4 22 6.5V9M22 16v1.5c0 2.5-2 4.5-4.5 4.5H16M9 22H6.5C4 22 2 20 2 17.5V15M7 12h10',
+  check:'M5 12l5 5L20 7', l:'M15 19l-7-7 7-7', r:'M9 5l7 7-7 7'
 };
 export const k = (n, s = 22, w = 1.5) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${KI[n]}"/></svg>`;
 const star = (cx, cy, t, q) => `M${cx - t},${cy - t} Q${cx},${cy - q} ${cx + t},${cy - t} Q${cx + q},${cy} ${cx + t},${cy + t} Q${cx},${cy + q} ${cx - t},${cy + t} Q${cx - q},${cy} ${cx - t},${cy - t}Z`;
@@ -45,13 +47,15 @@ const LOADERS = {
   visits:() => api('GET', '/api/doctor/visits', {role:'doctor'}).then(b => b.visits || []),
   assistant:() => api('GET', '/api/assistant/status', {role:'doctor'})
 };
-const NEEDS = {rsToday:['studies'], rsStudies:['studies'], rsPatients:['patients'], rsVisits:['visits'], rsSettings:['assistant']};
+/* Открытое исследование по таймеру не перечитывается: правка врача не должна пропасть */
+const NEEDS = {rsToday:() => ['studies'], rsStudies:studyNeeds, rsPatients:() => ['patients'], rsVisits:() => ['visits'], rsSettings:() => ['assistant']};
 export const rs = {};
 const inflight = {};
 let rerender = () => {};
 export const setRescanRender = fn => { rerender = fn; };
+export const redraw = () => rerender();
 
-async function load(key){
+export async function load(key){
   if (inflight[key]) return inflight[key];
   if (!rs[key]) rs[key] = {status:'loading', data:null, message:''};
   inflight[key] = (async () => {
@@ -62,10 +66,10 @@ async function load(key){
   })();
   return inflight[key];
 }
-/* Перечитать данные открытого экрана: при переходе и по таймеру main.js */
-export function refreshRescan(){
+/* Перечитать данные открытого экрана: при переходе и по таймеру main.js (timer = true) */
+export function refreshRescan(timer = false){
   if (!isRescanPage() || sessions.doctor?.status !== 'ok') return;
-  (NEEDS[state.page] || []).forEach(load);
+  (NEEDS[state.page] ? NEEDS[state.page](timer) : []).forEach(load);
 }
 
 /* ---------- Состояния: загрузка, ошибка с «Повторить», пусто ---------- */
@@ -113,10 +117,6 @@ function rsToday(){
   return head('Сегодня', 'Новые исследования и пациенты, которым нужно ваше решение') +
     stateOf('studies', list => list.length ? later('Плитки, новые исследования и поводы для внимания появятся здесь.') : empty('Новых исследований нет', 'Когда пациент или клиника загрузит исследование, оно появится здесь.'));
 }
-function rsStudies(){
-  return head('Исследования', 'Снимок, находки и заключение. Шаг пациенту назначает правило клиники') +
-    stateOf('studies', list => list.length ? later('Здесь откроется исследование: срезы, находки, заключение и маршрут.') : empty('Исследований нет', 'Загруженные исследования появятся здесь.'));
-}
 function rsPatients(){
   return head('Пациенты', 'Карта пациента, шаг маршрута и срок') +
     stateOf('patients', list => list.length ? later('Таблица пациентов с фильтрами и карточкой появится здесь.') : empty('Пациентов нет', 'Карты пациентов клиники появятся здесь.'));
@@ -141,6 +141,7 @@ export function installRescanActions(ACTIONS){
   ACTIONS.rsRetry = d => { rs[d.key] = {status:'loading', data:null, message:''}; rerender(); load(d.key); };
   ACTIONS.rsFeed = () => { ui.rsFeed = !ui.rsFeed; rerender(); };
   ACTIONS.rsRender = () => rerender();
+  installStudyActions(ACTIONS);
   /* Поиск пациента: текст живёт в ui.rsQuery, Enter открывает «Пациентов» */
   document.addEventListener('input', e => { if (e.target.id === 'rsQuery') ui.rsQuery = e.target.value; });
   document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'rsQuery' && state.page !== 'rsPatients') go('rsPatients'); });

@@ -292,3 +292,6 @@ body.m-clinic .servicebanner{padding:10px 22px}
 .c-err p{margin:0;font-size:13px;color:#7E2A33}
 .c-feed .c-empty{padding:14px}
 .c-greet .c-meta .demo{color:var(--c-fg3)}
+/* Длинные значения без пробелов (протокол, имя файла) переносятся, а не раздвигают карточку */
+#clinic .c-kv > span:last-child,#clinic .c-hdr > span{min-width:0;overflow-wrap:anywhere}
+#clinic .c-kv > span:first-child{flex-shrink:0;max-width:50%}

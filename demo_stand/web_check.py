@@ -231,6 +231,68 @@ def check_imaging(browser) -> list[str]:
     return failures
 
 
+def check_rescan_imaging(browser) -> list[str]:
+    """rescan cabinet, «Исследования»: the patient uploads a kit CT, the doctor sees the rule preview, pages real slices
+    and confirms; the route chain appears and the patient sees the result. Seeded studies are left untouched."""
+    archive = Path(env("DEMO_STATE_DIR")) / "kit" / "upload-ct-nodule.zip"
+    context = browser.new_context(viewport={"width": 1280, "height": 900})
+    patient, doctor = context.new_page(), context.new_page()
+    patient_errors, doctor_errors = watch(patient), watch(doctor)
+    failures = []
+    patient.goto(APP + "/#/patient/imaging")
+    wait_ready(patient)
+    patient.click("[data-action=uploadOpen]")
+    patient.set_input_files("#upFile", str(archive))
+    patient.select_option("#upKind", "ct_general")
+    patient.check("#upConsent")
+    patient.click("[data-action=upload]")
+    patient.wait_for_selector("#view .panel:has-text('Ждёт врача')", timeout=70000)
+    doctor.goto(APP + "/#/doctor/rsStudies")
+    wait_ready(doctor)
+    job = doctor.evaluate("""async () => {
+        const r = await fetch('/api/doctor/studies', {headers: {'X-MM-Role': 'doctor'}});
+        const list = (await r.json()).studies.filter(s => s.status === 'awaiting_physician' && s.uploaded_by_role === 'patient');
+        list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        return list.length ? list[0].id : null; }""")
+    if not job:
+        context.close()
+        return ["у врача нет загруженного пациентом исследования"]
+    doctor.wait_for_selector(f"[data-action=rsStudyOpen][data-id='{job}']")
+    doctor.click(f".c-tabs [data-action=rsStudyOpen][data-id='{job}']")
+    doctor.wait_for_selector("#clinic img.studyimg[src^='blob:']", timeout=20000)
+    text = doctor.inner_text("#view")
+    if "Демо-сценарий: признак задан заранее" not in text:
+        failures.append("нет плашки демо-сценария")
+    if "оценка модели" in text.lower().replace("оценка модели пациенту", ""):
+        failures.append("в демо-сценарии видна оценка модели")
+    if "Шаг по правилу клиники" not in text:
+        failures.append("нет предпросмотра шага по правилу")
+    if "Просмотр для проверки, не диагностический просмотрщик" not in text:
+        failures.append("нет подписи просмотрщика")
+    if doctor.query_selector("[data-action=rsRewrite]"):
+        failures.append("без ключа API у врача видна кнопка ИИ-помощника")
+    if not doctor.query_selector("#rsDraft") or not doctor.input_value("#rsDraft").strip():
+        failures.append("нет заготовки заключения")
+    planned = doctor.inner_text("#clinic .c-dec .c-next b") if doctor.query_selector("#clinic .c-dec .c-next b") else ""
+    first = doctor.get_attribute("#clinic img.studyimg", "alt")
+    doctor.click("[data-action=rsStep][data-step='1']")
+    doctor.wait_for_function(f"() => document.querySelector('#clinic img.studyimg').alt !== {first!r}")
+    doctor.wait_for_selector("#clinic img.studyimg[src^='blob:']")
+    doctor.click("[data-action=rsConfirm]")
+    doctor.wait_for_selector("#clinic .c-path:has-text('Подтверждено')", timeout=20000)
+    if not planned or planned not in doctor.inner_text("#clinic .c-dec"):
+        failures.append(f"после подтверждения шаг не совпал с предпросмотром «{planned}»")
+    patient.reload()
+    patient.wait_for_selector("#view .panel:has-text('Подтверждено врачом') img.studyimg[src^='blob:']", timeout=20000)
+    for word in ("оценка", "1.2.826"):
+        if word in patient.inner_text("#view"):
+            failures.append(f"пациенту видно «{word}»")
+    if patient_errors or doctor_errors:
+        failures.append("ошибки в консоли: " + "; ".join(patient_errors + doctor_errors))
+    context.close()
+    return failures
+
+
 def check_referral(browser) -> list[str]:
     """Coordinator and partner windows side by side: the seeded referral of Олег Р. without a name until accepted,
     the partner's time, «услуга оказана», and the coordinator marks the visit."""
@@ -344,6 +406,7 @@ def main() -> int:
                       ("Сквозной сценарий: запись → итог врача и рецепт → второй этап → бронь в аптеке", check_scenario),
                       ("Два окна с разными ролями не мешают друг другу", check_two_windows),
                       ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging),
+                      ("Кабинет rescan, «Исследования»: предпросмотр по правилу, настоящие срезы, подтверждение, цепочка маршрута", check_rescan_imaging),
                       ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral)]
             for title, check in checks:
                 failures = check(browser)

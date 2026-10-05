@@ -941,6 +941,7 @@ class Gateway:
         step = self._first_unfinished(raw)
         return {"episode_id": raw["id"], "status": raw.get("status"),
                 "step": step.get("description") if step and raw.get("status") == "active" else None,
+                "step_status": step.get("status") if step else None,
                 "reason": reason_text(raw.get("manual_reason")) if raw.get("status") == "manual_review" else ""}
 
     def _doctor_item(self, row: dict, job: dict | None, names: dict[str, str], episodes: dict[str, dict]) -> dict:
@@ -1012,6 +1013,7 @@ class Gateway:
                 result = self.upstream.json("path", "POST", "/v1/rules/dry-run",
                                             body={**scope, "finding_code": code}, auth="path_admin")
                 preview[code] = {"steps": result.get("steps") or [], "manual_reason": result.get("manual_reason"),
+                                 "manual_reason_text": reason_text(result.get("manual_reason")),
                                  "rule_version": result.get("rule_version"),
                                  "explanation": store.explanation(self.config.home_clinic, code)}
         except GatewayError:

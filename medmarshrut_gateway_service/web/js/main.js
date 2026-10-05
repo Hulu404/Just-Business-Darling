@@ -25,12 +25,12 @@ installPathExtra(ACTIONS);
 installImagingActions(ACTIONS);
 installClinicActions(ACTIONS);
 installRescanActions(ACTIONS);
-/* Перерисовка кабинета по приходу данных не сбрасывает фокус и курсор в поле поиска */
+/* Перерисовка кабинета по приходу данных не сбрасывает фокус и курсор в поле */
 setRescanRender(() => {
   const active = document.activeElement, id = active && active.id, at = active && active.selectionStart;
   render();
   const field = id && document.getElementById(id);
-  if (field && field !== active && field.tagName === 'INPUT'){ field.focus({preventScroll:true}); try { field.setSelectionRange(at, at); } catch (err){} }
+  if (field && field !== active && ['INPUT', 'TEXTAREA'].includes(field.tagName)){ field.focus({preventScroll:true}); try { field.setSelectionRange(at, at); } catch (err){} }
 });
 const refreshData = () => { refreshPath(); refreshPathExtra(); refreshImaging(); refreshClinic(); refreshRescan(); };
 const sessionRequests = {};
@@ -117,4 +117,4 @@ setInterval(() => { if (isPathPage()) refreshPath(); }, HEALTH_EVERY);
 setInterval(refreshPathExtra, HEALTH_EVERY);
 setInterval(() => { if (isImagingListPage()) refreshImaging(); }, HEALTH_EVERY);
 setInterval(() => { if (isClinicPage() && state.page !== 'referral') refreshClinic(); }, HEALTH_EVERY);
-setInterval(() => { if (isRescanPage()) refreshRescan(); }, HEALTH_EVERY);
+setInterval(() => { if (isRescanPage()) refreshRescan(true); }, HEALTH_EVERY);

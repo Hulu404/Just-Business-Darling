@@ -349,6 +349,7 @@ class StudyRouteTests(GatewayTestCase):
         preview = body["study"]["preview"]["DEMO_CT_INFILTRATE"]
         self.assertEqual(preview["steps"], [])
         self.assertEqual(preview["manual_reason"], "rule_not_approved")
+        self.assertEqual(preview["manual_reason_text"], "Правило ещё не утверждено клиникой: нужен план врача")
 
     def test_preview_is_null_when_path_service_is_down(self):
         self.path.mode = "drop"
@@ -420,6 +421,21 @@ class StudyRouteTests(GatewayTestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body["next"]["status"], "manual_review")
         self.assertEqual(body["next"]["reason"], "Правило ещё не утверждено клиникой: нужен план врача")
+        self.assertIsNone(body["next"]["step_status"])
+
+    def test_confirm_next_carries_step_status_for_the_route_chain(self):
+        self.image.routes[("POST", "/v1/review/job-own")] = lambda r: (200, confirmed(self.jobs["job-own"]))
+        self.path.routes.update({("GET", "/v1/episodes"): (200, {"episode_ids": ["ep-1"]}),
+                                 ("GET", "/v1/episodes/ep-1"): (200, {
+                                     "id": "ep-1", "status": "active", "source_report": {"source_report_id": "job-own"},
+                                     "plan_steps": [{"id": "s-1", "kind": "appointment", "status": "confirmed",
+                                                     "description": "Приём терапевта в течение 24 часов"}]})})
+        self.login("doctor")
+        status, _, body = self.call("POST", "/api/doctor/studies/job-own/confirm", role="doctor",
+                                    body={"conclusion": "Заключение врача"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["next"]["step"], "Приём терапевта в течение 24 часов")
+        self.assertEqual(body["next"]["step_status"], "confirmed")
 
     # ---------- upload ----------
 
