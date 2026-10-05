@@ -244,6 +244,7 @@ function rsReport(){
     const steps = e ? (e.steps || []).map((s, i) => { const cur = current(e)?.id === s.id; const done = DONE.includes(s.status);
       return `<div class="rs"><span class="st ${done ? 'on' : cur ? 'cur' : ''}">${done ? ic('check', 16, 2.6) : i + 1}</span><span style="flex:1;min-width:0"><div class="nm">${safe(s.description)}</div><div class="ds">${safe(statusName(s.status))} · ${safe(s.kind === 'manual_review' ? 'врач назначит шаг' : dueText(s))}</div></span>${cur && needsAction(e) ? `<button class="pchip good" type="button" data-action="phOpenStep" data-key="${safe(keyOf(e, s))}" style="border:0;height:30px">Записаться</button>` : ''}</div>`; }).join('') : '';
     return hd('Заключение', `${safe(st.title)} · подтверждено ${safe(fmtDay(st.confirmed_at))}`, '', back) + `<div class="sec">
+      ${st.plain ? `<div class="pnote"><div class="eye">Простыми словами · текст утвердил врач</div><p class="plain">${safe(st.plain.text).replace(/\n+/g, '<br>')}</p></div><span class="lab">Заключение врача</span>` : ''}
       <div class="rep">${safe(st.conclusion).replace(/\n+/g, '<br>')}</div>
       ${picture}
       <div class="pnote"><div class="eye">Что увидели</div><p class="plain">${safe(st.explanation?.seen)}</p></div>

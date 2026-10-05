@@ -126,6 +126,15 @@ class RegistryFake:
 
     def __init__(self):
         self.rows: dict[str, dict] = {}
+        self.plains: dict[str, dict] = {}
+
+    def plain_text(self, job_id):
+        return self.plains.get(job_id)
+
+    def save_plain_text(self, job_id, body, physician_id, lost_facts):
+        self.plains[job_id] = {"text": body, "physician_id": physician_id, "lost_facts": lost_facts,
+                               "approved_at": "2026-10-05T10:00:00+00:00"}
+        return self.plains[job_id]
 
     def register_study(self, job_id, clinic_id, patient_ref, task, title, kit, role, by, consent_at):
         self.rows.setdefault(job_id, {"job_id": job_id, "clinic_id": clinic_id, "patient_ref": patient_ref, "task": task,

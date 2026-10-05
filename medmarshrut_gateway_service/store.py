@@ -123,10 +123,10 @@ class GatewayStore:
                 cur.execute("SELECT to_regclass('services'), to_regclass('finding_texts'), "
                             "to_regclass('slots'), to_regclass('appointments'), to_regclass('study_registry'), "
                             "to_regclass('referral_links'), to_regclass('assistant_texts'), "
-                            "to_regclass('patient_settings'), to_regclass('self_medications')")
+                            "to_regclass('patient_settings'), to_regclass('self_medications'), to_regclass('plain_texts')")
                 if not all(cur.fetchone()):
                     raise StoreError("Миграция шлюза не применена. Запустите migrate.py apply для выбранной схемы.")
-                cur.execute("""SELECT count(*)=13 AND bool_and(
+                cur.execute("""SELECT count(*)=14 AND bool_and(
                                has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'SELECT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'INSERT')
                                AND has_table_privilege(current_user, quote_ident(%s) || '.' || quote_ident(tablename), 'UPDATE')
@@ -134,7 +134,7 @@ class GatewayStore:
                                FROM pg_tables WHERE schemaname=%s AND tablename IN
                                 ('services','service_followups','finding_texts','slots','appointments',
                                 'threads','messages','outcome_submissions','study_registry','referral_links',
-                                'assistant_texts','patient_settings','self_medications')""",
+                                'assistant_texts','patient_settings','self_medications','plain_texts')""",
                             (self.schema, self.schema, self.schema, self.schema, self.schema))
                 if not cur.fetchone()[0]:
                     raise StoreError("Серверной роли нужны права чтения и записи таблиц шлюза.")
@@ -146,7 +146,7 @@ class GatewayStore:
     def clear_working(self) -> None:
         with self.transaction() as cur:
             for table in ("messages", "threads", "appointments", "slots", "outcome_submissions", "study_registry",
-                          "referral_links", "assistant_texts", "self_medications"):
+                          "referral_links", "assistant_texts", "self_medications", "plain_texts"):
                 cur.execute(f"DELETE FROM {table}")
 
     def seed_catalog(self, clinic_id: str) -> None:
@@ -440,6 +440,20 @@ class GatewayStore:
                            ON CONFLICT (job_id, input_hash) DO NOTHING""", (job_id, input_hash, model, body))
             cur.execute("SELECT body FROM assistant_texts WHERE job_id=%s AND input_hash=%s", (job_id, input_hash))
             return cur.fetchone()[0]
+
+    def plain_text(self, job_id: str) -> dict | None:
+        """Text for the patient in plain words, approved by the physician (task 13+)."""
+        with self.transaction(read_only=True) as cur:
+            cur.execute("SELECT body, physician_id, lost_facts, approved_at FROM plain_texts WHERE job_id=%s", (job_id,))
+            row = cur.fetchone()
+        return {"text": row[0], "physician_id": row[1], "lost_facts": row[2], "approved_at": row[3].isoformat()} if row else None
+
+    def save_plain_text(self, job_id: str, body: str, physician_id: str, lost_facts: bool) -> dict:
+        with self.transaction() as cur:
+            cur.execute("""INSERT INTO plain_texts (job_id, body, physician_id, lost_facts) VALUES (%s,%s,%s,%s)
+                           ON CONFLICT (job_id) DO UPDATE SET body=EXCLUDED.body, physician_id=EXCLUDED.physician_id,
+                           lost_facts=EXCLUDED.lost_facts, approved_at=now()""", (job_id, body, physician_id, lost_facts))
+        return self.plain_text(job_id)
 
     def outcome_timestamp(self, event_id: str, episode_id: str, step_id: str,
                           physician_id: str, content: dict) -> str:

@@ -87,6 +87,9 @@ python .\medmarshrut_gateway_service\service.py
 | `GET /api/assistant/status` | все четыре | `{"enabled"}`: есть ли у шлюза ключ API помощника |
 | `POST /api/doctor/studies/{id}/assistant/rewrite` | врач | `{"finding_code", "text"}` → `{"suggestion"}`; только для исследования, которое ждёт врача; ничего не сохраняет |
 | `POST /api/patient/studies/{id}/assistant/explain` | пациент | `{}` → `{"explanation"}`; только своё и только подтверждённое исследование; ответ кешируется в `assistant_texts` |
+| `POST /api/doctor/studies/{id}/assistant/simplify` | врач | `{}` → `{"text", "check"}`; подтверждённое заключение простыми словами, черновик, ничего не сохраняет; в API — только название исследования и заключение |
+| `POST /api/doctor/studies/{id}/plain/check` | врач | `{"text"}` → `{"check": {"ok", "kept", "missing", "added"}}`; сверка фактов с заключением (`plaincheck.py`), без ИИ, работает без ключа |
+| `POST /api/doctor/studies/{id}/plain` | врач | `{"text", "accept_missing"?}` → `{"plain"}`; утверждает текст для пациента в `plain_texts` (миграция `006`); при потерянных или новых фактах — 409 `plain_lost_facts`, пока врач не передаст `accept_missing: true`. Пациент получает `plain` в `GET /api/patient/studies` только у подтверждённого исследования |
 
 Новый маршрут добавляется в `Gateway.routes` и в `Gateway.access` (роли). Маршрут без строки в `access` отвечает 403: по умолчанию запрещено. Шаблон пути может содержать `{параметр}`.
 

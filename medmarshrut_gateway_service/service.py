@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from assistant import DOCTOR_UNAVAILABLE, PATIENT_UNAVAILABLE, Assistant
+from assistant import DOCTOR_UNAVAILABLE, PATIENT_UNAVAILABLE, SIMPLIFY_UNAVAILABLE, Assistant
 from catalog import STUDY_NAMES
 from errors import GatewayError
 from imaging import (MAX_ARCHIVE, MAX_CONCLUSION, MODALITY_TYPES, TASKS, build_manifest, confirm_body,
@@ -24,6 +24,7 @@ from pharmacy import PHARMACY_LABELS, PharmacyModule
 from sessions import ROLES, People, Session, SessionStore, cookie_name
 from store import GatewayStore, StoreConflict, StoreError
 from upstream import Upstream, human_error, patient_ref, service_url, text
+from plaincheck import preservation
 from views import patient_episode, reason_text, staff_episode
 
 MAX_BODY = 32 * 1024
@@ -227,6 +228,9 @@ class Gateway:
             ("GET", "/api/assistant/status"): self.assistant_status,
             ("POST", "/api/doctor/studies/{id}/assistant/rewrite"): self.doctor_rewrite,
             ("POST", "/api/patient/studies/{id}/assistant/explain"): self.patient_explain,
+            ("POST", "/api/doctor/studies/{id}/assistant/simplify"): self.doctor_simplify,
+            ("POST", "/api/doctor/studies/{id}/plain/check"): self.doctor_plain_check,
+            ("POST", "/api/doctor/studies/{id}/plain"): self.doctor_plain_approve,
              # ---- Медикаменты ----
             ("GET", "/api/patient/offers"): self.pharmacy.patient_offers,
             ("GET", "/api/patient/prescriptions/{id}/offers"): self.pharmacy.patient_prescription_offers,
@@ -306,6 +310,9 @@ class Gateway:
             ("GET", "/api/assistant/status"): set(ROLES),
             ("POST", "/api/doctor/studies/{id}/assistant/rewrite"): {"doctor"},
             ("POST", "/api/patient/studies/{id}/assistant/explain"): {"patient"},
+            ("POST", "/api/doctor/studies/{id}/assistant/simplify"): {"doctor"},
+            ("POST", "/api/doctor/studies/{id}/plain/check"): {"doctor"},
+            ("POST", "/api/doctor/studies/{id}/plain"): {"doctor"},
              ("GET", "/api/patient/offers"): {"patient"},
             ("GET", "/api/patient/prescriptions/{id}/offers"): {"patient"},
             ("GET", "/api/patient/orders"): {"patient"},
@@ -909,6 +916,8 @@ class Gateway:
                              "label": place(finding, job.get("study"))}
         raw = episodes().get(row["job_id"])
         item["episode"] = patient_episode(raw, explanation) if raw else None
+        plain = self.data_store().plain_text(row["job_id"])
+        item["plain"] = {"text": plain["text"], "approved_at": plain["approved_at"]} if plain else None
         return item
 
     def patient_studies(self, ctx: Context) -> tuple[int, dict]:
@@ -986,6 +995,10 @@ class Gateway:
             item["next"] = self._next(job, episodes)
         return item
 
+    def _doctor_plain(self, job_id: str, conclusion: str) -> dict | None:
+        plain = self.data_store().plain_text(job_id)
+        return {**plain, "check": preservation(conclusion, plain["text"])} if plain else None
+
     def doctor_studies(self, ctx: Context) -> tuple[int, dict]:
         rows = self.data_store().studies(self.config.home_clinic)
         jobs = self._many(self._review, [row["job_id"] for row in rows])
@@ -1007,6 +1020,8 @@ class Gateway:
                         test_message="Техническая проверка, анализ не выполнялся" if job.get("status") == "test_only" else None,
                         templates=conclusion_templates(job, item["title"], self.demo_texts)
                         if job.get("status") == "awaiting_physician" else {})
+            if item.get("confirmation"):
+                item["plain"] = self._doctor_plain(row["job_id"], item["confirmation"]["conclusion"] or "")
             if job.get("status") == "awaiting_physician":
                 item["preview"] = self._study_preview(job)
         return 200, {"study": item}
@@ -1130,6 +1145,43 @@ class Gateway:
             saved = store.save_assistant_text(row["job_id"], key, self.assistant.model,
                                               self.assistant.explain_for_patient(row["job_id"], payload))
         return 200, {"explanation": saved}
+
+    # ---------- Простыми словами: упрощение заключения для пациента, сверка фактов, утверждение врачом ----------
+
+    def _confirmed_conclusion(self, study_id: str) -> tuple[dict, str]:
+        """Only a confirmed conclusion is simplified: the patient's text must not drift from the final one."""
+        row = self._registry_row(study_id)
+        job = self._review(row["job_id"])
+        conclusion = ((job or {}).get("confirmation") or {}).get("conclusion")
+        if job is None or job.get("status") != "confirmed" or not conclusion:
+            raise GatewayError(409, "not_confirmed", "Сначала подтвердите заключение: упрощённый текст строится по подтверждённому.")
+        return row, conclusion
+
+    def doctor_simplify(self, ctx: Context) -> tuple[int, dict]:
+        """A draft in plain words plus the fact check. Nothing is stored. To the API: study title and the conclusion."""
+        if not self.assistant.enabled:
+            raise GatewayError(503, "assistant_unavailable", SIMPLIFY_UNAVAILABLE)
+        row, conclusion = self._confirmed_conclusion(ctx.params["id"])
+        draft = self.assistant.simplify_conclusion(row["job_id"], {"study": self._title(row), "conclusion": conclusion})
+        return 200, {"text": draft, "check": preservation(conclusion, draft)}
+
+    def doctor_plain_check(self, ctx: Context) -> tuple[int, dict]:
+        """The fact check without the assistant: works for text the physician wrote by hand."""
+        _, conclusion = self._confirmed_conclusion(ctx.params["id"])
+        return 200, {"check": preservation(conclusion, text(ctx.body.get("text"), "text", MAX_CONCLUSION))}
+
+    def doctor_plain_approve(self, ctx: Context) -> tuple[int, dict]:
+        """Lost or new facts stop the approval until the physician says accept_missing explicitly."""
+        row, conclusion = self._confirmed_conclusion(ctx.params["id"])
+        body = text(ctx.body.get("text"), "text", MAX_CONCLUSION)
+        check = preservation(conclusion, body)
+        if not check["ok"] and ctx.body.get("accept_missing") is not True:
+            lost = ", ".join(check["missing"]) or "—"
+            new = ", ".join(check["added"]) or "—"
+            raise GatewayError(409, "plain_lost_facts", f"В тексте для пациента потерялось: {lost}. Новое, чего нет в заключении: {new}. "
+                               "Исправьте текст или утвердите его как есть.")
+        saved = self.data_store().save_plain_text(row["job_id"], body, ctx.session.actor, not check["ok"])
+        return 200, {"plain": {**saved, "check": check}}
 
     @staticmethod
     def _normalize_override_step(override: dict) -> dict:

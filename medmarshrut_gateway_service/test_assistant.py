@@ -196,6 +196,80 @@ class AssistantRouteTests(GatewayTestCase):
         self.assertEqual((status, len(self.stub.calls)), (200, 2))
         self.assertIn("Другое заключение врача", self.sent())
 
+    # ---------- plain words: simplify, fact check, approval ----------
+
+    FACTS = "Участок уплотнения справа 12 мм. Заключение: инфильтрат. Рекомендован приём терапевта."
+    PLAIN_OK = "Справа в лёгком есть участок уплотнения 12 мм. Врач советует прийти к терапевту."
+    PLAIN_LOST = "В лёгком есть участок уплотнения. Сходите к онкологу."
+
+    def plain(self, route, body=None, role="doctor", job_id="job-own"):
+        return self.call("POST", f"/api/doctor/studies/{job_id}/{route}", role=role, body=body or {})
+
+    def test_simplify_only_for_doctor_and_only_after_confirmation(self):
+        for role in ("patient", "staff"):
+            self.login(role)
+            for route in ("assistant/simplify", "plain/check", "plain"):
+                self.assertEqual(self.plain(route, {"text": "Текст"}, role=role)[0], 403)
+        self.login("doctor")
+        for route in ("assistant/simplify", "plain/check", "plain"):
+            status, _, body = self.plain(route, {"text": "Текст"})
+            self.assertEqual((status, body["error"]["code"]), (409, "not_confirmed"))
+        self.assertEqual(self.stub.calls, [])
+
+    def test_simplify_sends_only_the_conclusion_and_returns_the_check(self):
+        self.confirm_own(self.FACTS)
+        self.stub.text = self.PLAIN_LOST
+        self.login("doctor")
+        status, _, body = self.plain("assistant/simplify")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["text"], self.PLAIN_LOST)
+        self.assertEqual((body["check"]["ok"], body["check"]["missing"], body["check"]["added"]),
+                         (False, ["12 мм", "справа", "терапевт"], ["онколог"]))
+        sent = self.sent()
+        for word in NEVER_SENT:
+            self.assertNotIn(word, sent)
+        self.assertIn("Участок уплотнения справа 12 мм", sent)
+        self.assertEqual(self.store.plains, {})
+        self.assertIn("route=simplify study=job-own", self.logged[-1])
+
+    def test_check_works_without_the_assistant(self):
+        self.gateway.assistant = Assistant(None)
+        self.confirm_own(self.FACTS)
+        self.login("doctor")
+        status, _, body = self.plain("plain/check", {"text": self.PLAIN_OK})
+        self.assertEqual((status, body["check"]["ok"], body["check"]["kept"]), (200, True, ["12 мм", "справа", "терапевт"]))
+        status, _, body = self.plain("assistant/simplify")
+        self.assertEqual((status, body["error"]["code"]), (503, "assistant_unavailable"))
+
+    def test_lost_facts_block_approval_until_the_doctor_accepts(self):
+        self.confirm_own(self.FACTS)
+        self.login("doctor")
+        status, _, body = self.plain("plain", {"text": self.PLAIN_LOST})
+        self.assertEqual((status, body["error"]["code"]), (409, "plain_lost_facts"))
+        self.assertIn("12 мм", body["error"]["message"])
+        self.assertEqual(self.store.plains, {})
+        status, _, body = self.plain("plain", {"text": self.PLAIN_LOST, "accept_missing": True})
+        self.assertEqual((status, self.store.plains["job-own"]["lost_facts"]), (200, True), body)
+        status, _, body = self.plain("plain", {"text": self.PLAIN_OK, "physician_id": "attacker"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual((self.store.plains["job-own"]["physician_id"], self.store.plains["job-own"]["lost_facts"]),
+                         ("doctor-demo", False))
+        self.assertTrue(body["plain"]["check"]["ok"])
+
+    def test_patient_sees_the_approved_text_only_on_own_confirmed_study(self):
+        self.store.plains["job-own"] = {"text": self.PLAIN_OK, "physician_id": "doctor-demo", "lost_facts": False,
+                                        "approved_at": "2026-10-05T10:00:00+00:00"}
+        self.login("patient")
+        _, _, body = self.call("GET", "/api/patient/studies", role="patient")
+        own = next(s for s in body["studies"] if s["id"] == "job-own")
+        self.assertNotIn("plain", own)  # before confirmation: status only
+        self.assertNotIn(self.PLAIN_OK, json.dumps(body, ensure_ascii=False))
+        self.confirm_own(self.FACTS)
+        _, _, body = self.call("GET", "/api/patient/studies", role="patient")
+        own = next(s for s in body["studies"] if s["id"] == "job-own")
+        self.assertEqual(own["plain"], {"text": self.PLAIN_OK, "approved_at": "2026-10-05T10:00:00+00:00"})
+        self.assertNotIn("physician_id", json.dumps(own["plain"]))
+
     # ---------- failures ----------
 
     def test_failures_are_503_and_no_text_is_shown_or_stored(self):

@@ -24,6 +24,8 @@ const text = value => safe(value).replace(/\n+/g, '<br>');
 
 /* Открытое исследование: {id, status, data, message}; черновики по коду признака живут до смены исследования */
 const det = {id:null, status:'idle', data:null, message:'', index:0, drafts:{}, code:null, busy:false, suggest:null, suggesting:false};
+/* «Простыми словами»: черновик врача, результат сверки, занятость кнопок; сбрасывается при смене исследования */
+const plain = {id:null, editing:false, text:'', check:null, busy:'', blocked:false};
 
 /* Ожидающие проверки — первыми, как в образце */
 const ordered = list => [...list].sort((a, b) => (b.status === 'awaiting_physician') - (a.status === 'awaiting_physician'));
@@ -31,6 +33,7 @@ export function studyNeeds(timer){ return timer && det.status === 'ok' ? [] : ['
 
 async function loadDetail(id){
   Object.assign(det, {id, status:'loading', data:null, message:'', index:0, drafts:{}, code:null, suggest:null});
+  if (plain.id !== id) Object.assign(plain, {id, editing:false, text:'', check:null, busy:'', blocked:false});
   redraw();
   try {
     const st = (await api('GET', `/api/doctor/studies/${enc(id)}`, {role:'doctor'})).study;
@@ -86,6 +89,40 @@ function conclusionBlock(st, assistant){
     ${assistant ? `<div class="c-act"><button class="c-btn gh sm" type="button" data-action="rsRewrite">${det.suggesting ? 'Готовим вариант…' : 'Улучшить формулировку'}</button></div>` : ''}${suggest}`;
 }
 
+/* Простыми словами для пациента: ИИ упрощает подтверждённое заключение, шлюз сверяет факты, врач утверждает */
+function checkView(c){
+  if (!c) return '';
+  const chip = (label, tone, mark) => `<span class="c-s ${tone}" style="min-width:0">${mark} ${safe(label)}</span>`;
+  const row = (title, list, tone, mark) => list.length ? `<div class="c-kv" style="align-items:flex-start"><span>${title}</span><span style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end">${list.map(x => chip(x, tone, mark)).join('')}</span></div>` : '';
+  const verdict = c.ok ? '<div class="c-kv"><b>Факты заключения сохранены</b><span class="c-s green">Сверено</span></div>' : '<div class="c-kv"><b>Текст расходится с заключением</b><span class="c-s red">Проверьте</span></div>';
+  const none = !c.kept.length && !c.missing.length ? '<div class="c-kv"><span>Чисел, стороны и специалистов в заключении нет</span><span></span></div>' : '';
+  return `<div class="c-kvs" id="rsPlainCheck">${verdict}${row('Сохранено', c.kept, 'green', '✓')}${row('Потерялось', c.missing, 'red', '✕')}${row('Нет в заключении', c.added, 'amber', '+')}${none}</div>
+    <span class="c-demo">Сверка автоматическая: числа и размеры, сроки, сторона, сегменты, категории, специалисты и контроль. Смысл целиком проверяете вы.</span>`;
+}
+function plainBlock(st, assistant){
+  if (st.status !== 'confirmed') return '';
+  const saved = st.plain;
+  const badge = saved ? `<span class="c-s ${saved.lost_facts ? 'amber' : 'green'}">${saved.lost_facts ? 'Утверждено с расхождением' : 'Утверждено'}</span>` : '<span class="c-s grey">Не утверждено</span>';
+  const title = `<div class="c-ch"><span><h2>Простыми словами для пациента</h2><span class="sub">пациент увидит этот текст над вашим заключением</span></span>${badge}</div>`;
+  const aiBtn = label => assistant ? `<button class="c-btn${saved || plain.editing ? ' gh' : ''} sm" type="button" data-action="rsPlainAi"${plain.busy ? ' disabled' : ''}>${plain.busy === 'ai' ? 'Упрощаем…' : label}</button>` : '';
+  if (!plain.editing){
+    if (!saved) return `<div class="c-card" style="margin-top:14px">${title}<span style="font-size:13px;color:var(--c-fg2)">Пока пациент видит ваше заключение и объяснение, утверждённое клиникой. Перескажите заключение простыми словами, чтобы пациенту было понятно, что происходит.</span>
+      <div class="c-act">${aiBtn('Упростить с ИИ')}<button class="c-btn gh sm" type="button" data-action="rsPlainEdit">Написать самому</button></div></div>`;
+    return `<div class="c-card" style="margin-top:14px">${title}<div class="c-msg" style="font-size:13px;line-height:1.6">${text(saved.text)}</div>${checkView(saved.check)}
+      <span class="c-demo">Утверждено ${safe(fmt(saved.approved_at))}.</span><div class="c-act"><button class="c-btn gh sm" type="button" data-action="rsPlainEdit">Изменить</button></div></div>`;
+  }
+  return `<div class="c-card" style="margin-top:14px">${title}
+    <div class="c-hl"><span class="c-hl-h">Ваше заключение</span><span style="color:var(--c-fg)">${text(st.confirmation.conclusion)}</span></div>
+    <div class="c-fld"><label for="rsPlain">Текст для пациента</label><textarea id="rsPlain" maxlength="${MAX_TEXT}" style="min-height:150px;border:1.5px solid transparent;border-radius:14px;padding:12px 14px;font:inherit;font-size:13px;line-height:1.6;resize:vertical;background:var(--c-main);color:var(--c-fg)">${safe(plain.text)}</textarea></div>
+    ${checkView(plain.check)}
+    <div class="c-act">${aiBtn('Упростить с ИИ заново')}
+      <button class="c-btn gh sm" type="button" data-action="rsPlainCheck"${plain.busy ? ' disabled' : ''}>${plain.busy === 'check' ? 'Сверяем…' : 'Проверить сохранность'}</button>
+      <button class="c-btn sm" type="button" data-action="rsPlainApprove"${plain.busy ? ' disabled' : ''}>${plain.busy === 'save' ? 'Утверждаем…' : 'Утвердить для пациента'}</button>
+      ${plain.blocked ? `<button class="c-btn gh sm" type="button" data-action="rsPlainApprove" data-force="1"${plain.busy ? ' disabled' : ''}>Утвердить всё равно</button>` : ''}
+      <button class="c-lnk" type="button" data-action="rsPlainCancel">Отмена</button></div>
+    <span class="c-demo">Текст от ИИ — черновик. Пациент увидит только то, что вы утвердите.</span></div>`;
+}
+
 /* ---------- Правая колонка: маршрут и что увидит пациент ---------- */
 function routeCard(st){
   if (st.status === 'awaiting_physician'){
@@ -125,7 +162,7 @@ function patientCard(st){
     body = `<div class="c-bub"><span class="c-bub-h">${k('scan', 14, 1.7)}после подтверждения</span>${ex ? `<b>Что увидели.</b> ${safe(ex.seen)}<br><b>Что это значит.</b> ${safe(ex.means)}` : 'Клиника ещё не утвердила объяснение для этого признака: пациент увидит общий текст и ваше заключение.'}</div>
       <div class="c-after"><span>Следующий шаг</span><b>${safe(p?.steps?.[0]?.description || 'План назначит врач')}</b><small>Объяснение утверждено клиникой. Оценка модели пациенту не показывается.</small></div>`;
   } else if (st.status === 'confirmed'){
-    body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>Ваше заключение, утверждённое объяснение и шаг${st.next?.step ? ' «' + safe(st.next.step) + '»' : ''}</b><small>Оценка модели пациенту не показывается.</small></div>`;
+    body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>${st.plain ? 'Текст простыми словами, ваше' : 'Ваше'} заключение, утверждённое объяснение и шаг${st.next?.step ? ' «' + safe(st.next.step) + '»' : ''}</b><small>Оценка модели пациенту не показывается.</small></div>`;
   } else body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>«Врач описывает сам»</b><small>Координатор свяжется с пациентом.</small></div>`;
   /* Ссылка открывает окно пациента (роль «пациент», раздел «Что на снимке») */
   return `<div class="c-card"><div class="c-ch"><span><h2>Что увидит пациент</h2><span class="sub">в разделе «Что на снимке»</span></span></div><div class="c-msg">${body}</div><div class="c-act"><button class="c-lnk" type="button" data-jump="patient:rsResults">Посмотреть глазами пациента</button></div></div>`;
@@ -152,7 +189,7 @@ function detail(waiting){
   const hdr = `<div class="c-hdr">${avatar(st.patient, 44)}<span><b>${safe(st.patient)}</b><small>${safe(st.title)} · ${safe(fmt(st.created_at))} · ${source}</small></span><span style="margin-left:auto">${mod ? `<span class="c-mod" style="--m:${mod[1]}">${mod[0]}</span>` : ''}</span></div>`;
   if (st.status === 'unavailable') return `<div class="c-card">${hdr}<div class="c-err"><p>${safe(st.message)}. Попросите загрузить исследование заново.</p></div></div>`;
   const next = waiting.find(s => s.id !== st.id);
-  return `<div class="c-grid"><div class="c-card">${hdr}${st.demo ? `<div class="c-next" style="background:#FFF1CC"><b>${DEMO_NOTE}</b></div>` : ''}${viewer(st)}${findingsBlock(st)}${conclusionBlock(st, assistant)}</div>
+  return `<div class="c-grid"><div class="c-card">${hdr}${st.demo ? `<div class="c-next" style="background:#FFF1CC"><b>${DEMO_NOTE}</b></div>` : ''}${viewer(st)}${findingsBlock(st)}${conclusionBlock(st, assistant)}${plainBlock(st, assistant)}</div>
     <div class="c-col">${routeCard(st)}${patientCard(st)}${st.status !== 'awaiting_physician' && next ? `<button class="c-btn gh" type="button" data-action="rsStudyOpen" data-id="${safe(next.id)}">Следующее: ${safe(short(next.patient))} ${k('r', 14, 2)}</button>` : ''}</div></div>`;
 }
 
@@ -190,9 +227,50 @@ export function installStudyActions(ACTIONS){
     } catch (err){ toast(err.message); }
     det.suggesting = false; redraw();
   };
+  const plainUrl = tail => `/api/doctor/studies/${enc(det.data.id)}/${tail}`;
+  const plainValue = () => $('#rsPlain')?.value ?? plain.text;
+  const plainEmpty = () => toast('Поле пустое. Напишите текст для пациента или нажмите «Упростить с ИИ».');
+  ACTIONS.rsPlainEdit = () => { Object.assign(plain, {editing:true, text:plain.text || det.data?.plain?.text || '', check:plain.check || det.data?.plain?.check || null}); redraw(); };
+  ACTIONS.rsPlainCancel = () => { Object.assign(plain, {editing:false, text:'', check:null, blocked:false}); redraw(); };
+  ACTIONS.rsPlainAi = async () => {
+    if (!det.data || plain.busy) return;
+    plain.busy = 'ai'; redraw();
+    try { const r = await api('POST', plainUrl('assistant/simplify'), {role:'doctor', body:{}}); Object.assign(plain, {editing:true, text:r.text, check:r.check, blocked:false}); }
+    catch (err){ toast(err.message); }
+    plain.busy = ''; redraw();
+  };
+  ACTIONS.rsPlainCheck = async () => {
+    if (!det.data || plain.busy) return;
+    plain.text = plainValue();
+    if (!plain.text.trim()) return plainEmpty();
+    plain.busy = 'check'; redraw();
+    try { plain.check = (await api('POST', plainUrl('plain/check'), {role:'doctor', body:{text:plain.text}})).check; plain.blocked = false; }
+    catch (err){ toast(err.message); }
+    plain.busy = ''; redraw();
+  };
+  ACTIONS.rsPlainApprove = async d => {
+    if (!det.data || plain.busy) return;
+    plain.text = plainValue();
+    if (!plain.text.trim()) return plainEmpty();
+    plain.busy = 'save'; redraw();
+    try {
+      const r = await api('POST', plainUrl('plain'), {role:'doctor', body:{text:plain.text, ...(d.force ? {accept_missing:true} : {})}});
+      det.data.plain = r.plain;
+      Object.assign(plain, {editing:false, text:'', check:null, blocked:false});
+      toast('Текст утверждён. Пациент увидит его в заключении');
+    } catch (err){
+      toast(err.message);
+      if (err.code === 'plain_lost_facts'){
+        plain.blocked = true;
+        try { plain.check = (await api('POST', plainUrl('plain/check'), {role:'doctor', body:{text:plain.text}})).check; } catch (e){}
+      }
+    }
+    plain.busy = ''; redraw();
+  };
   ACTIONS.rsSuggestUse = () => { if (!det.suggest) return; det.drafts[det.suggest.code] = det.suggest.text; det.suggest = null; redraw(); };
   ACTIONS.rsSuggestDrop = () => { det.suggest = null; redraw(); };
   document.addEventListener('input', e => {
+    if (e.target.id === 'rsPlain'){ plain.text = e.target.value; plain.blocked = false; return; }
     if (e.target.id !== 'rsDraft') return;
     det.drafts[e.target.dataset.code] = e.target.value;
     const count = $('#rsDraftCount');
