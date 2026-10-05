@@ -1755,9 +1755,12 @@ def main() -> None:
     except StoreError as exc:
         raise SystemExit(f"Gateway database error: {exc}") from None
     gateway = Gateway(config, store=store)
-    server = ThreadingHTTPServer(("127.0.0.1", config.port), make_handler(gateway))
+    # По умолчанию только петлевой интерфейс (браузер ходит в шлюз через соседние процессы стенда).
+    # На PaaS вроде Railway публичный процесс должен слушать 0.0.0.0 — тогда GATEWAY_BIND=0.0.0.0.
+    bind = os.environ.get("GATEWAY_BIND") or "127.0.0.1"
+    server = ThreadingHTTPServer((bind, config.port), make_handler(gateway))
     gateway.port = server.server_address[1]
-    print(f"MedMarshrut gateway: http://127.0.0.1:{gateway.port}", flush=True)
+    print(f"MedMarshrut gateway: http://{bind}:{gateway.port}", flush=True)
     try:
         server.serve_forever()
     finally:

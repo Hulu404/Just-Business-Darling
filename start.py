@@ -26,6 +26,11 @@ SECRET_NAMES = ("PATH_SHARED_SECRET", "PATH_ADMIN_TOKEN", "PATH_PATIENT_TOKEN", 
                 "CLINIC_SHARED_SECRET", "CLINIC_ADMIN_TOKEN", "CLINIC_STAFF_TOKENS",
                 "MED_SHARED_SECRET", "MED_ADMIN_TOKEN", "MED_PATIENT_TOKEN", "MED_STAFF_TOKENS")
 
+# Railway и другие PaaS задают порт публичного процесса в $PORT и ждут, что он слушает 0.0.0.0.
+# Локально переменной нет: шлюз остаётся на 127.0.0.1:8763, остальные сервисы всегда на localhost.
+PUBLIC_PORT = int(os.environ.get("PORT") or 8763)
+PUBLIC_BIND = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
+
 SERVICES = [
     {"name": "path", "title": "сервис пути", "port": 8765,
      "script": {"demo": "medmarshrut_path_service/service.py", "real": "medmarshrut_path_service/service.py"},
@@ -58,11 +63,12 @@ SERVICES = [
          "MED_INVENTORY": str(ROOT / "medmarshrut_medications_service" / "pharmacies.json"),
      },
      "pages": []},
-    {"name": "gateway", "title": "шлюз и веб-приложение", "port": 8763, "health": "/api/health",
+    {"name": "gateway", "title": "шлюз и веб-приложение", "port": PUBLIC_PORT, "health": "/api/health",
      "script": {"demo": "medmarshrut_gateway_service/service.py", "real": "medmarshrut_gateway_service/service.py"},
      "env": lambda s, state, mode: {"REVIEWER_TOKEN": s["REVIEWER_TOKEN"], "PATH_ADMIN_TOKEN": s["PATH_ADMIN_TOKEN"],
                                     "CLINIC_SHARED_SECRET": s["CLINIC_SHARED_SECRET"],
                                     "CLINIC_STAFF_TOKENS": s["CLINIC_STAFF_TOKENS"], "GATEWAY_HOME_CLINIC": "clinic-central",
+                                    "GATEWAY_PORT": str(PUBLIC_PORT), "GATEWAY_BIND": PUBLIC_BIND,
                                     "GATEWAY_STATE_DIR": str(state), "GATEWAY_PEOPLE": str(DEMO / "people.demo.json"),
                                     "GATEWAY_IMAGING_MODE": imaging_mode(mode),
                                     "MED_SHARED_SECRET": s["MED_SHARED_SECRET"],
@@ -72,11 +78,12 @@ SERVICES = [
                                     **GATEWAY_DB_ENV, **GATEWAY_ASSISTANT_ENV},
      "pages": []},
 ]
-APP_URL = f"http://{HOST}:8763"
+APP_URL = f"http://{HOST}:{PUBLIC_PORT}"
 STRIPPED_ENV = {"ENABLE_TEST_BACKEND", "ROUTER_URL", "PATH_DB", "CLINIC_DB", "PATH_RULES", "CLINIC_NETWORK",
                 "DEMO_STUDY_INDEX", "PATH_MIS_TOKEN", "CLINIC_MIS_TOKEN", "IMAGE_URL", "PATH_URL", "CLINIC_URL",
                 "MED_DB", "MED_CATALOG", "MED_INVENTORY", "MED_URL",
                 "GATEWAY_HOME_CLINIC", "GATEWAY_STATE_DIR", "GATEWAY_PEOPLE", "GATEWAY_IMAGING_MODE", "GATEWAY_PORT",
+                "GATEWAY_BIND", "PORT",
                 "GATEWAY_DATABASE_URL", "GATEWAY_DB_SCHEMA", "GATEWAY_SUPABASE_PROJECT_REF"}
 # The assistant's API key goes to the gateway only (task 11): never to the three services, seed or checks.
 ASSISTANT_ENV = ("ANTHROPIC_API_KEY", "GATEWAY_ASSISTANT_MODEL")
