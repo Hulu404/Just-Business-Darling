@@ -13,10 +13,10 @@ import { $, badge, errorNote, loadingCards, renderModal, safe, serviceBanner } f
 export const NAVS = {
   patient:[['home','home','Главная'],['plan','route','Мой план'],['imaging','scan','Что на снимке'],['appointments','calendar','Записи'],['messages','message','Сообщения'],['pharmacy','pharmacy','Аптека'],['documents','doc','Документы']],
   staff:[['inbox','inbox','Обращения'],['scheduling','clock','Запись и сопровождение'],['requests','doctor','Связь с врачами'],['comms','message','Связь с пациентами'],['partners','link','Партнёры'],['pharmacyAdmin','pharmacy','Аптека и заказы'],['rules','sliders','Маршруты и правила'],['analytics','bars','Аналитика']],
-  doctor:[['reading','scan','Что на снимке'],['doctor','calendar','Приёмы'],['requests','message','Связь с клиникой'],['inbox','inbox','Обращения']],
+  doctor:[['rsToday','home','Сегодня'],['rsStudies','scan','Исследования'],['rsPatients','route','Пациенты'],['rsVisits','calendar','Приёмы'],['rsSettings','sliders','Настройки']],
   partner:[['incoming','inbox','Входящие направления']]
 };
-export const HOME = {patient:'home', staff:'inbox', doctor:'reading', partner:'incoming'};
+export const HOME = {patient:'home', staff:'inbox', doctor:'rsToday', partner:'incoming'};
 export const roleName = () => state.role === 'patient' ? 'Пациент' : state.role === 'staff' ? 'Клиника' : state.role === 'partner' ? 'Клиника-партнёр' : 'Врач';
 export function navCount(id){
   if (state.role === 'patient'){

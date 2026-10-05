@@ -126,7 +126,8 @@ function patientCard(st){
   } else if (st.status === 'confirmed'){
     body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>Ваше заключение, утверждённое объяснение и шаг${st.next?.step ? ' «' + safe(st.next.step) + '»' : ''}</b><small>Оценка модели пациенту не показывается.</small></div>`;
   } else body = `<div class="c-after" style="margin:0;padding:0;border:0"><span>Пациент видит</span><b>«Врач описывает сам»</b><small>Координатор свяжется с пациентом.</small></div>`;
-  return `<div class="c-card"><div class="c-ch"><span><h2>Что увидит пациент</h2><span class="sub">в разделе «Что на снимке»</span></span></div><div class="c-msg">${body}</div></div>`;
+  /* Ссылка открывает окно пациента (роль «пациент», раздел «Что на снимке») */
+  return `<div class="c-card"><div class="c-ch"><span><h2>Что увидит пациент</h2><span class="sub">в разделе «Что на снимке»</span></span></div><div class="c-msg">${body}</div><div class="c-act"><button class="c-lnk" type="button" data-jump="patient:imaging">Посмотреть глазами пациента</button></div></div>`;
 }
 
 /* ---------- Экран ---------- */

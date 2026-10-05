@@ -22,10 +22,9 @@ SCREENS = [
     ("patient", "documents"),
     ("staff", "inbox"), ("staff", "case"), ("staff", "scheduling"), ("staff", "requests"), ("staff", "comms"),
     ("staff", "partners"), ("staff", "pharmacyAdmin"), ("staff", "rules"), ("staff", "analytics"),
-    ("doctor", "reading"), ("doctor", "study"), ("doctor", "doctor"), ("doctor", "requests"), ("doctor", "inbox"),
-    ("patient", "services"), ("staff", "services"), ("doctor", "services"),
+    ("patient", "services"), ("staff", "services"),
     ("partner", "incoming"), ("partner", "services"),
-    # rescan doctor cabinet (task 12): opened by address until the switch-over cycle
+    # rescan doctor cabinet (task 12): the only doctor screens after the switch-over (cycle 9)
     ("doctor", "rsToday"), ("doctor", "rsStudies"), ("doctor", "rsPatients"), ("doctor", "rsVisits"), ("doctor", "rsSettings"),
 ]
 WIDTHS = (390, 820, 1280, 1680)
@@ -106,13 +105,24 @@ def check_screens(browser) -> list[str]:
     page.go_forward()
     page.wait_for_function("() => location.hash === '#/staff/scheduling'")
     # jumps from «Карта сервисов» open the right role and screen
-    for target, expected, title in (("staff:partners:refs", "#/staff/partners", "Партнёры"),
-                                    ("doctor:reading", "#/doctor/reading", "Что на снимке")):
-        open_screen(page, "patient", "services")
-        page.click(f'[data-jump="{target}"] >> nth=0')
+    open_screen(page, "patient", "services")
+    page.click('[data-jump="staff:partners:refs"] >> nth=0')
+    wait_ready(page)
+    if page.evaluate("() => location.hash") != "#/staff/partners" or page.inner_text("#topbar strong") != "Партнёры":
+        failures.append("переход staff:partners открыл " + page.evaluate("() => location.hash"))
+    # «Глазами врача» ведёт в кабинет rescan: прежних экранов врача больше нет
+    open_screen(page, "patient", "services")
+    page.click('[data-jump="doctor:rsStudies"] >> nth=0')
+    wait_ready(page)
+    if page.evaluate("() => location.hash") != "#/doctor/rsStudies" or "Исследования" not in page.inner_text("#view"):
+        failures.append("переход «Глазами врача» открыл " + page.evaluate("() => location.hash"))
+    # прежние адреса врача открывают стартовый экран кабинета, а не старый каркас
+    for old in ("reading", "inbox"):
+        page.evaluate(f"location.hash = '#/doctor/{old}'")
+        page.reload()
         wait_ready(page)
-        if page.evaluate("() => location.hash") != expected or page.inner_text("#topbar strong") != title:
-            failures.append(f"переход {target} открыл {page.evaluate('() => location.hash')}")
+        if page.evaluate("() => location.hash") != "#/doctor/rsToday" or not page.query_selector("#clinic"):
+            failures.append(f"прежний адрес #/doctor/{old} не открыл кабинет: " + page.evaluate("() => location.hash"))
     page.close()
     return failures
 
@@ -211,8 +221,9 @@ def check_two_windows(browser) -> list[str]:
     return failures
 
 
-def check_imaging(browser) -> list[str]:
-    """Patient uploads a kit CT as a file, the doctor confirms it on real slices, the patient sees the result."""
+def check_rescan_imaging(browser) -> list[str]:
+    """rescan cabinet, «Исследования»: the patient uploads a kit CT, the doctor sees the rule preview, pages real slices
+    and confirms; the route chain appears and the patient sees the result. Seeded studies are left untouched."""
     archive = Path(env("DEMO_STATE_DIR")) / "kit" / "upload-ct-nodule.zip"
     context = browser.new_context(viewport={"width": 1280, "height": 900})
     patient, doctor = context.new_page(), context.new_page()
@@ -225,52 +236,6 @@ def check_imaging(browser) -> list[str]:
         failures.append("в окне загрузки нет рентгенографии")
     patient.click("[data-action=uploadKit]")
     patient.wait_for_selector("[data-action=uploadKitSend]")
-    patient.set_input_files("#upFile", str(archive))
-    patient.select_option("#upKind", "ct_general")
-    patient.check("#upConsent")
-    patient.click("[data-action=upload]")
-    patient.wait_for_selector("#view .panel:has-text('Ждёт врача')", timeout=70000)
-    doctor.goto(APP + "/#/doctor/reading")
-    doctor.wait_for_selector("[data-action=studyOpen]")
-    doctor.click("[data-action=studyOpen] >> nth=0")
-    doctor.wait_for_selector("img.studyimg[src^='blob:']")
-    if "Демо-сценарий: признак задан заранее" not in doctor.inner_text("#view"):
-        failures.append("нет плашки демо-сценария")
-    if "Оценка модели" in doctor.inner_text("#view"):
-        failures.append("в демо-сценарии видна оценка модели")
-    if doctor.query_selector("[data-action=studyRewrite]"):
-        failures.append("без ключа API у врача видна кнопка ИИ-помощника")
-    doctor.click("[data-action=studyStep][data-step='1']")
-    doctor.wait_for_selector("img.studyimg[src^='blob:']")
-    doctor.click("[data-action=studyConfirm]")
-    doctor.wait_for_selector("#view:has-text('Шаг по правилу')", timeout=20000)
-    patient.reload()
-    patient.wait_for_selector("#view .panel:has-text('Подтверждено врачом') img.studyimg[src^='blob:']", timeout=20000)
-    text = patient.inner_text("#view")
-    for word in ("оценка", "0.0", "1.2.826"):
-        if word in text:
-            failures.append(f"пациенту видно «{word}»")
-    if not patient.query_selector("[data-action=pathChoose]"):
-        failures.append("у пациента нет кнопки записи")
-    if patient.query_selector("[data-action=studyExplain]") or "ИИ-помощник" in text:
-        failures.append("без ключа API у пациента видна кнопка ИИ-помощника")
-    if patient_errors or doctor_errors:
-        failures.append("ошибки в консоли: " + "; ".join(patient_errors + doctor_errors))
-    context.close()
-    return failures
-
-
-def check_rescan_imaging(browser) -> list[str]:
-    """rescan cabinet, «Исследования»: the patient uploads a kit CT, the doctor sees the rule preview, pages real slices
-    and confirms; the route chain appears and the patient sees the result. Seeded studies are left untouched."""
-    archive = Path(env("DEMO_STATE_DIR")) / "kit" / "upload-ct-nodule.zip"
-    context = browser.new_context(viewport={"width": 1280, "height": 900})
-    patient, doctor = context.new_page(), context.new_page()
-    patient_errors, doctor_errors = watch(patient), watch(doctor)
-    failures = []
-    patient.goto(APP + "/#/patient/imaging")
-    wait_ready(patient)
-    patient.click("[data-action=uploadOpen]")
     patient.set_input_files("#upFile", str(archive))
     patient.select_option("#upKind", "ct_general")
     patient.check("#upConsent")
@@ -526,7 +491,6 @@ def main() -> int:
                       ("Кабинет rescan, «Сегодня» на чистом стенде: Игорь С. в «Новых», Мария К. и Сергей Т. в «Требуют внимания», Елена П. в «Приёмах»", check_rescan_today),
                       ("Сквозной сценарий: запись → итог врача и рецепт → второй этап → бронь в аптеке", check_scenario),
                       ("Два окна с разными ролями не мешают друг другу", check_two_windows),
-                      ("Снимок: пациент загружает ZIP, врач подтверждает на настоящих срезах, пациент видит заключение и запись", check_imaging),
                       ("Кабинет rescan, «Исследования»: предпросмотр по правилу, настоящие срезы, подтверждение, цепочка маршрута", check_rescan_imaging),
                       ("Кабинет rescan, «Приёмы»: запись пациента появляется у врача за 20 с без обновления, итог создаёт следующий шаг", check_rescan_visits),
                       ("Кабинет rescan, «Пациенты»: Мария К. получает план врача, запись в анамнез видна после обновления", check_rescan_patients),

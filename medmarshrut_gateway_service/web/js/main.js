@@ -8,7 +8,7 @@ import { installPathExtra, pathAnalytics, pathDoctor, pathRules, refreshPathExtr
 import { imagingPage, installImagingActions, isImagingListPage, readingPage, refreshImaging, studyPage } from './imaging-ui.js';
 import { analyticsClinicBlock, documentsReferrals, incomingPage, installClinicActions, isClinicPage, partnersPage, referralPage, refreshClinic } from './clinic-ui.js';
 import { documents } from './pages/patient.js';
-import { RESCAN_PAGES, installRescanActions, isRescanPage, refreshRescan, setRescanRender } from './rescan-ui.js';
+import { RESCAN_PAGES, RS_PAGES, installRescanActions, isRescanPage, refreshRescan, setRescanRender } from './rescan-ui.js';
 
 const ROLES = ['patient', 'staff', 'doctor', 'partner'];
 const DEFAULT_PARTNER = 'clinic-partner-1';
@@ -39,7 +39,9 @@ const sessionRequests = {};
 function parseHash(){
   const m = /^#\/([a-z]+)\/([A-Za-z]+)(?:\?clinic=([a-z0-9-]+))?$/.exec(location.hash);
   if (!m || !ROLES.includes(m[1]) || !Object.prototype.hasOwnProperty.call(PAGES, m[2])) return null;
-  return m[1] === 'partner' ? {role:m[1], page:m[2], partnerClinic:m[3] || DEFAULT_PARTNER} : {role:m[1], page:m[2]};
+  /* У врача только кабинет rescan: прежние адреса (#/doctor/reading, #/doctor/inbox) открывают стартовый экран */
+  const page = m[1] === 'doctor' && !RS_PAGES.includes(m[2]) ? 'rsToday' : m[2];
+  return m[1] === 'partner' ? {role:m[1], page, partnerClinic:m[3] || DEFAULT_PARTNER} : {role:m[1], page};
 }
 const hashOf = () => `#/${state.role}/${state.page}${state.role === 'partner' ? '?clinic=' + (state.partnerClinic || DEFAULT_PARTNER) : ''}`;
 
@@ -69,11 +71,12 @@ async function ensureSession(role){
 /* Назад, вперёд и ручная правка адреса */
 function applyRoute(){
   const route = parseHash();
-  if (!route) history.replaceState(null, '', hashOf());
-  else if (route.role !== state.role || route.page !== state.page || (route.partnerClinic || null) !== (state.role === 'partner' ? state.partnerClinic : null)){
+  if (route && (route.role !== state.role || route.page !== state.page || (route.partnerClinic || null) !== (state.role === 'partner' ? state.partnerClinic : null))){
     Object.assign(state, route);
     ui.mobileOpen = false; ui.modal = null;
   }
+  /* Канонический адрес: нет маршрута или он нормализован (прежний экран врача → rsToday) */
+  if (location.hash !== hashOf()) history.replaceState(null, '', hashOf());
   render();
   window.scrollTo(0, 0);
   ensureSession(state.role).then(refreshData);
@@ -107,7 +110,7 @@ ACTIONS.healthRetry = () => { Object.assign(health, {status:'loading', data:null
 setState(freshState());
 const start = parseHash();
 if (start) Object.assign(state, start);
-else history.replaceState(null, '', hashOf());
+if (location.hash !== hashOf()) history.replaceState(null, '', hashOf());  // нормализуем адрес (прежний экран врача → rsToday)
 window.addEventListener('popstate', applyRoute);
 render();
 ensureSession(state.role).then(refreshData);
