@@ -284,6 +284,51 @@ class GatewayStore:
             return {"id": row[0], "starts_at": slot[0].isoformat(), "place": slot[1], "format": slot[2],
                     "reused": False}, old[0] if old else None
 
+    def service_offer(self, clinic_id: str) -> list[dict]:
+        """Каталог для записи пациента вне плана: услуги своей клиники, ближайшее свободное время и число окон."""
+        with self.transaction(read_only=True) as cur:
+            cur.execute("""SELECT v.code, v.title, v.kind, v.specialist, v.room,
+                                  min(s.starts_at), count(s.id)
+                           FROM services v LEFT JOIN slots s ON s.service_id=v.id AND s.starts_at>now()
+                             AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.slot_id=s.id
+                                             AND a.status IN ('offered','confirmed'))
+                           WHERE v.clinic_id=%s AND v.is_active AND NOT v.partner_only
+                           GROUP BY v.id ORDER BY v.id""", (clinic_id,))
+            rows = cur.fetchall()
+        return [{"code": r[0], "title": r[1], "kind": r[2], "specialist": r[3], "room": r[4],
+                 "next_at": r[5].isoformat() if r[5] else None, "free": r[6], "demo": True} for r in rows]
+
+    def service_slots(self, clinic_id: str, code: str) -> list[dict] | None:
+        """Свободное время услуги; None — такой услуги в клинике нет."""
+        with self.transaction(read_only=True) as cur:
+            cur.execute("SELECT title FROM services WHERE clinic_id=%s AND code=%s AND is_active AND NOT partner_only",
+                        (clinic_id, code))
+            row = cur.fetchone()
+        return None if row is None else self.slots(clinic_id, row[0])
+
+    def book_service(self, clinic_id: str, patient_ref: str, code: str, slot_id: str, booked_by_id: str) -> dict:
+        """Запись пациента к врачу вне плана. Занятое время — StoreConflict; уникальный индекс защищает слот."""
+        if not slot_id.isdecimal():
+            raise StoreConflict("Выберите время из списка и попробуйте снова.")
+        with self.transaction() as cur:
+            cur.execute("""SELECT s.starts_at, s.place, s.format, s.specialist, v.title FROM slots s
+                           JOIN services v ON v.id=s.service_id
+                           WHERE s.id=%s AND s.clinic_id=%s AND v.code=%s AND s.starts_at>now()""",
+                        (int(slot_id), clinic_id, code))
+            slot = cur.fetchone()
+            if not slot:
+                raise StoreConflict("Это время больше недоступно. Обновите список и выберите другое.")
+            cur.execute("""INSERT INTO appointments
+                (patient_ref, slot_id, clinic_id, starts_at, place, format, status, booked_by, booked_by_id, service_code)
+                VALUES (%s,%s,%s,%s,%s,%s,'confirmed','patient',%s,%s)
+                ON CONFLICT DO NOTHING RETURNING id""",
+                (patient_ref, int(slot_id), clinic_id, slot[0], slot[1], slot[2], booked_by_id, code))
+            row = cur.fetchone()
+            if not row:
+                raise StoreConflict("Это время уже занято. Обновите список и выберите другое.")
+        return {"id": row[0], "starts_at": slot[0].isoformat(), "place": slot[1], "format": slot[2],
+                "specialist": slot[3], "title": slot[4], "status": "confirmed"}
+
     def appointment_status(self, appointment_id: int, status: str) -> None:
         with self.transaction() as cur:
             cur.execute("UPDATE appointments SET status=%s, updated_at=now() WHERE id=%s", (status, appointment_id))
@@ -301,12 +346,15 @@ class GatewayStore:
     def patient_appointments(self, patient_ref: str) -> list[dict]:
         """Записи пациента в расписании своей клиники: время, статус, специалист, место и формат."""
         with self.transaction(read_only=True) as cur:
-            cur.execute("""SELECT a.episode_id, a.step_id, a.starts_at, a.status, sl.specialist, a.place, a.format
+            cur.execute("""SELECT a.episode_id, a.step_id, a.starts_at, a.status, sl.specialist, a.place, a.format,
+                                  a.service_code, v.title
                            FROM appointments a LEFT JOIN slots sl ON sl.id=a.slot_id
+                           LEFT JOIN services v ON v.id=sl.service_id
                            WHERE a.patient_ref=%s ORDER BY a.starts_at""", (patient_ref,))
             rows = cur.fetchall()
+        # service_code есть только у записи вне плана (задание 13+): эпизода и шага у неё нет
         return [{"episode_id": r[0], "step_id": r[1], "starts_at": r[2].isoformat(), "status": r[3],
-                 "specialist": r[4], "place": r[5], "format": r[6]} for r in rows]
+                 "specialist": r[4], "place": r[5], "format": r[6], "service_code": r[7], "title": r[8]} for r in rows]
 
     def appointment_for_step(self, episode_id: str, step_id: str) -> dict | None:
         with self.transaction(read_only=True) as cur:
@@ -331,14 +379,16 @@ class GatewayStore:
     def appointments_between(self, clinic_id: str, from_iso: str, to_iso: str) -> list[dict]:
         with self.transaction(read_only=True) as cur:
             cur.execute("""SELECT a.id, a.episode_id, a.step_id, a.patient_ref, a.clinic_id, a.starts_at, a.place,
-                                  a.format, a.status, a.booked_by
-                           FROM appointments a
+                                  a.format, a.status, a.booked_by, v.title
+                           FROM appointments a LEFT JOIN slots sl ON sl.id=a.slot_id
+                           LEFT JOIN services v ON v.id=sl.service_id
                            WHERE a.clinic_id=%s AND a.starts_at>=%s AND a.starts_at<%s
                              AND a.status IN ('offered','confirmed','attended')
                            ORDER BY a.starts_at""", (clinic_id, from_iso, to_iso))
             rows = cur.fetchall()
         return [{"id": r[0], "episode_id": r[1], "step_id": r[2], "patient_ref": r[3], "clinic_id": r[4],
-                 "starts_at": r[5].isoformat(), "place": r[6], "format": r[7], "status": r[8], "booked_by": r[9]}
+                 "starts_at": r[5].isoformat(), "place": r[6], "format": r[7], "status": r[8], "booked_by": r[9],
+                 "service_title": r[10]}
                 for r in rows]
 
     def add_patient_message(self, clinic_id: str, patient_ref: str, actor: str, episode_id: str,
