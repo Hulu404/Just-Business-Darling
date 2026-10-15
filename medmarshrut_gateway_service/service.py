@@ -185,6 +185,9 @@ class Gateway:
             ("GET", "/api/catalog"): self.catalog,
             ("GET", "/api/slots"): self.slots,
             ("GET", "/api/patient/episodes"): self.patient_episodes,
+            ("GET", "/api/patient/services"): self.patient_services,
+            ("GET", "/api/patient/services/{code}/slots"): self.patient_service_slots,
+            ("POST", "/api/patient/services/{code}/book"): self.patient_service_book,
             ("GET", "/api/patient/episodes/{id}"): self.patient_episode,
             ("GET", "/api/staff/episodes"): self.staff_episodes,
             ("GET", "/api/staff/episodes/{id}"): self.staff_episode,
@@ -267,6 +270,9 @@ class Gateway:
             ("GET", "/api/catalog"): set(ROLES),
             ("GET", "/api/slots"): {"patient", "staff"},
             ("GET", "/api/patient/episodes"): {"patient"},
+            ("GET", "/api/patient/services"): {"patient"},
+            ("GET", "/api/patient/services/{code}/slots"): {"patient"},
+            ("POST", "/api/patient/services/{code}/book"): {"patient"},
             ("GET", "/api/patient/episodes/{id}"): {"patient"},
             ("GET", "/api/staff/episodes"): {"staff", "doctor"},
             ("GET", "/api/staff/episodes/{id}"): {"staff", "doctor"},
@@ -474,6 +480,26 @@ class Gateway:
         if step is None or step.get("kind") == "manual_review":
             raise GatewayError(404, "not_found", "Шаг плана не найден. Обновите страницу.")
         return 200, {"slots": self.data_store().slots(self.config.home_clinic, step["description"]), "demo": True}
+
+    # ---------- Запись к любому врачу своей клиники вне плана (демо-расписание) ----------
+
+    def patient_services(self, ctx: Context) -> tuple[int, dict]:
+        return 200, {"services": self.data_store().service_offer(self.config.home_clinic), "demo": True}
+
+    def patient_service_slots(self, ctx: Context) -> tuple[int, dict]:
+        slots = self.data_store().service_slots(self.config.home_clinic, ctx.params["code"])
+        if slots is None:
+            raise GatewayError(404, "not_found", "Такой услуги нет в клинике. Откройте «Запись» заново.")
+        return 200, {"slots": slots, "demo": True}
+
+    def patient_service_book(self, ctx: Context) -> tuple[int, dict]:
+        """Пациент и автор записи — из сессии, не из тела запроса. План и сервис пути запись не меняет."""
+        if self.data_store().service_slots(self.config.home_clinic, ctx.params["code"]) is None:
+            raise GatewayError(404, "not_found", "Такой услуги нет в клинике. Откройте «Запись» заново.")
+        appointment = self.data_store().book_service(self.config.home_clinic, ctx.session.patient_ref,
+                                                     ctx.params["code"], str(ctx.body.get("slot_id", "")),
+                                                     ctx.session.actor)
+        return 200, {"appointment": appointment, "demo": True}
 
     def patient_episode(self, ctx: Context) -> tuple[int, dict]:
         raw = self._owned_episode(ctx, ctx.params["id"])
@@ -1542,7 +1568,7 @@ class Gateway:
                 **a,
                 "patient_name": names.get(a["patient_ref"], "Пациент не указан"),
                 "physician_name": step.get("owner") or "Координатор",
-                "reason": step.get("description") or "",
+                "reason": step.get("description") or a.get("service_title") or "",
                 "clinic_name": "Клиника «Линия здоровья»",
             })
         return 200, {"appointments": result}

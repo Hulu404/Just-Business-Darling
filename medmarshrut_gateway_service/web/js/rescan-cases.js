@@ -1,8 +1,6 @@
 /* Кейсы образца rescan (prototype/rescan-app-standalone.html, CASES и ORG): модель органа, точки находок,
    выноски с параметрами и подсвеченное заключение. Учебные, демо: пациенты вымышленные, кнопок одобрения нет —
-   настоящее подтверждение идёт выше, по исследованиям из сервиса снимков. Стили — rescan.css (.c-stage, .c-org …). */
-import { state, ui } from './state.js';
-import { redraw } from './rescan-ui.js';
+   настоящее подтверждение идёт по исследованиям из сервиса снимков. Стили — rescan.css (.c-stage, .c-org …). */
 
 const KI = {
   lung:'M12 3v7M12 10c-1.4 1-2.6-1.6-4.7-1.6C5 8.4 4 11.3 4 14.3 4 17.1 5 18 7 18c2.9 0 5-1.9 5-4.8M12 10c1.4 1 2.6-1.6 4.7-1.6 2.3 0 3.3 2.9 3.3 5.9 0 2.8-1 3.7-3 3.7-2.9 0-5-1.9-5-4.8',
@@ -77,18 +75,20 @@ function stage(c){
   return `<div class="c-tw"><div class="c-stage"><div class="c-org" style="left:${ox}%;top:${oy}%;width:${ow}%;height:${oh}%"><img src="/assets/img/rescan/${c.organ}.webp" alt="3D-модель: ${c.tab.toLowerCase()}"></div>${lines}${pts}${ends}${widgets}${float}</div></div>`;
 }
 
-/* Блок под исследованиями врача: вкладки по органам, модель с выносками, заключение и предложенный маршрут */
-export function casesBlock(){
-  const c = CASES.find(x => x.id === ui.rsCase) || CASES[0];
-  const tabs = CASES.map(x => `<button class="c-tab" type="button" data-action="rsCase" data-id="${x.id}" aria-pressed="${x.id === c.id}">${ki(x.ti)}${x.tab}</button>`).join('');
-  return `<div class="c-h" style="margin-top:28px"><div><h1>Кейсы образца</h1><p>Демо: так rescan показывает находки на модели органа. Пациенты вымышленные, одобрять нечего</p></div><div class="c-tabs" role="group" aria-label="Кейс">${tabs}</div></div>
-    <div class="c-grid" id="rsCases"><div class="c-card"><div class="c-hdr"><span><b>${c.who} · демо</b><small>${c.study} · учебный кейс</small></span><span style="margin-left:auto"><span class="c-mod" style="--m:${MODC[c.mod]}">${c.mod}</span></span></div>
+/* Кейсы — вкладки «Исследований» рядом с настоящими: id вкладки «case:<id>», отдельной загрузки нет */
+const PREFIX = 'case:';
+export const isCase = id => String(id || '').startsWith(PREFIX);
+export const caseIds = () => CASES.map(x => PREFIX + x.id);
+export function caseTabs(selected){
+  return CASES.map(x => `<button class="c-tab" type="button" data-action="rsStudyOpen" data-id="${PREFIX + x.id}" aria-pressed="${PREFIX + x.id === selected}" title="${x.study} · учебный кейс, демо">${ki(x.ti)}${x.who}<small style="color:var(--c-fg2);font-weight:400">демо</small></button>`).join('');
+}
+
+/* Открытый кейс: модель с выносками, заключение и предложенный маршрут. Одобрять нечего — пациенты вымышленные */
+export function caseDetail(id){
+  const c = CASES.find(x => PREFIX + x.id === id) || CASES[0];
+  return `<div class="c-grid" id="rsCases"><div class="c-card"><div class="c-hdr"><span><b>${c.who} · демо</b><small>${c.study} · учебный кейс</small></span><span style="margin-left:auto"><span class="c-mod" style="--m:${MODC[c.mod]}">${c.mod}</span></span></div>
       ${stage(c)}<div class="c-hl"><span class="c-hl-h">Заключение «Третье Мнение» · подсвечено, что извлёк rescan</span>${c.text}</div></div>
     <div class="c-col"><div class="c-card c-dec"><div class="c-ch"><span><h2>Маршрут</h2><span class="sub">предложен ИИ · ${c.rule}</span></span><span class="c-s grey">Демо</span></div>
       ${c.route.map((r, i) => `<div class="c-next"><span>${i ? 'Дальше по плану' : 'Первый шаг'}</span><b>${r[0]}</b><small>${r[1]}</small></div>`).join('')}
-      <div class="c-demo">Учебный кейс из образца. Настоящий маршрут строится только по утверждённому правилу клиники после подтверждения врачом.</div></div></div></div>`;
-}
-
-export function installCaseActions(ACTIONS){
-  ACTIONS.rsCase = d => { ui.rsCase = d.id; if (state.page === 'rsStudies') redraw(); };
+      <div class="c-demo">Учебный кейс из образца: так rescan показывает находки на модели органа. Пациент вымышленный, одобрять нечего. Настоящий маршрут строится только по утверждённому правилу клиники после подтверждения врачом.</div></div></div></div>`;
 }
