@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "rescan_core: uvicorn",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8000"],
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    },
+    {
+      "name": "pytest: все тесты",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-vv", "tests"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "pytest: текущий файл",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-vv", "${file}"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "seed_demo: залить демо-данные",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "scripts.seed_demo",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

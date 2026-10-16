@@ -12,3 +12,27 @@ medmarshrut_path_service/*.sqlite3-*
 prototype/rescan-app-standalone.html
 prototype/rescan-app-text.html
 medmarshrut_gateway_service/web/fonts/
+
+
+# --- Личное: личные заметки и черновики ---
+rescan_core/docs/for-you.md
+rescan_core/docs/personal/
+rescan_core/notes*.md
+rescan_core/scratch/
+rescan_core/*.local
+
+# --- Личные настройки IDE ---
+
+# Игнорируем личные настройки VS Code, но оставляем общие
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# --- Личные скрипты-черновики ---
+
+
+# --- Мусор от ОС ---
+.DS_Store
+Thumbs.db
+desktop.ini
