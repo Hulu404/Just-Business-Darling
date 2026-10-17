@@ -6,15 +6,16 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_session
 from app.schemas.events import CsvUploadResult, IngestResult, ResultsReadyEvent
-from app.security.hmac import require_mis_signature
+from app.security.hmac import require_csv_signature, require_mis_signature
 from app.services.csv_parser import parse_visits_csv
 from app.services.ingest_service import IngestService
+from app.services.visit_service import import_visits
 
 router = APIRouter(prefix="/v1/mis", tags=["mis"])
 
@@ -32,10 +33,11 @@ async def results_ready(
     """Принять одно событие. Повтор с тем же event_id → duplicate."""
     try:
         event = ResultsReadyEvent.model_validate(json.loads(body))
-    except (ValidationError, json.JSONDecodeError) as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except (ValidationError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # ValidationError содержит входные значения, в том числе телефон.
+        raise HTTPException(422, detail="Некорректное событие. Проверьте поля контракта.") from exc
 
-    return IngestService(session).ingest(event, raw=body)
+    return IngestService(session).ingest(event)
 
 
 @router.post(
@@ -44,10 +46,9 @@ async def results_ready(
     summary="Загрузка выгрузки визитов (CSV)",
 )
 async def upload_visits_csv(
-    file: UploadFile = File(...),
-    _: bytes = Depends(require_mis_signature),
+    content: bytes = Depends(require_csv_signature),
+    session: Session = Depends(get_session),
 ) -> CsvUploadResult:
-    """Разобрать CSV визитов. Возвращает число принятых строк и ошибки построчно."""
-    content = await file.read()
+    """Сохранить новые валидные визиты; повторы не увеличивают accepted."""
     rows, errors = parse_visits_csv(content)
-    return CsvUploadResult(accepted=len(rows), errors=errors)
+    return CsvUploadResult(accepted=import_visits(session, rows), errors=errors)

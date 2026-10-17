@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Episode, Event
+from app.db.models import Episode
 from app.repositories.event_repository import (
     ClinicRepository,
     DirectoryRepository,
@@ -29,21 +29,26 @@ class IngestService:
 
     def ingest(self, event: ResultsReadyEvent, *, raw: bytes | None = None,
                actor_id: str | None = None) -> IngestResult:
-        # 1) Быстрая проверка дубля (не создаём второй эпизод).
-        existing = self.events.get_event(event.event_id)
-        if existing is not None:
+        clinic = self.clinics.integration_clinic()
+        # Резервируем событие первым: конкурентный повтор ждёт commit/rollback.
+        # raw намеренно не сохраняем: телефон живёт только в contacts.
+        stored, inserted = self.events.claim_event(
+            event.event_id,
+            clinic_id=clinic.id,
+            branch_external_id=event.branch_id,
+            patient_token=event.patient_token,
+            ordering_doctor_external_id=event.ordering_doctor_id,
+            ready_at=event.ready_at,
+            marketing_consent=event.marketing_consent,
+        )
+        if not inserted:
+            episode_id = stored.episode_id
+            self.session.rollback()
             return IngestResult(
                 status=IngestStatus.DUPLICATE,
                 event_id=event.event_id,
-                episode_id=existing.episode_id,
+                episode_id=episode_id,
                 group=None,
-            )
-
-        clinic = self.clinics.first_clinic()
-        if clinic is None:
-            raise RuntimeError(
-                "в базе нет ни одной клиники — сначала загрузите демо-данные "
-                "(python -m scripts.seed_demo)"
             )
 
         # 2) Справочники.
@@ -71,23 +76,8 @@ class IngestService:
         self.session.add(episode)
         self.session.flush()
 
-        # 6) Само событие (для идемпотентности и разбора инцидентов).
-        stored = Event(
-            event_id=event.event_id,
-            clinic_id=clinic.id,
-            branch_external_id=event.branch_id,
-            patient_token=event.patient_token,
-            ordering_doctor_external_id=event.ordering_doctor_id,
-            ready_at=event.ready_at,
-            marketing_consent=event.marketing_consent,
-            episode_id=episode.id,
-            raw_payload=raw.decode() if raw else None,
-        )
-        inserted = self.events.add_event(stored)
-        if not inserted:
-            # Гонка: параллельный запрос успел вставить то же событие.
-            self.session.rollback()
-            return IngestResult(status=IngestStatus.DUPLICATE, event_id=event.event_id)
+        # 6) Связь с эпизодом становится видна вместе с событием при commit.
+        stored.episode_id = episode.id
 
         # 7) Согласие (B11): фиксируем наличие согласия на рекламу.
         from app.db.models import Consent

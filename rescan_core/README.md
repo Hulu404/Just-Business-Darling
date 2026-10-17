@@ -54,10 +54,17 @@ rescan_core/
 ├── tests/                          # pytest
 ├── docs/                           # setup.md, for-you.md, contract.md
 ├── .vscode/                        # настройки и отладка VS Code
-├── .github/workflows/ci.yml        # lint + types + tests
 ├── pyproject.toml
 └── alembic.ini
 ```
+
+CI расположен в корне репозитория: `.github/workflows/rescan-core.yml`.
+Он проверяет lint, типы, миграции и тесты на SQLite и PostgreSQL.
+
+После обновления от 17.10.2026 выполните `python -m alembic upgrade head`:
+миграция очищает сохранённые исходные тела событий и расширяет ID аудита.
+Очистка тел необратима; старые резервные копии не изменяются.
+Отправители МИС должны включать timestamp в подпись — см. `docs/contract.md`.
 
 ## Правила проекта (не нарушать)
 

@@ -1,4 +1,9 @@
-import hashlib, hmac, json, time, urllib.request
+import json
+import time
+import urllib.request
+
+from app.config import get_settings
+from app.security.hmac import compute_signature
 
 body = json.dumps({
     "event_id": "evt-manual-1",
@@ -10,10 +15,11 @@ body = json.dumps({
     "marketing_consent": True,
 }).encode()
 
-sig = hmac.new(b"dev-only-change-me", body, hashlib.sha256).hexdigest()
+timestamp = str(int(time.time()))
+sig = compute_signature(body, get_settings().mis_hmac_secret, timestamp)
 req = urllib.request.Request(
     "http://127.0.0.1:8000/v1/mis/results-ready", data=body,
     headers={"X-Rescan-Signature": sig,
-             "X-Rescan-Timestamp": str(int(time.time())),
+             "X-Rescan-Timestamp": timestamp,
              "Content-Type": "application/json"})
-print(urllib.request.urlopen(req).read().decode())
+print(urllib.request.urlopen(req, timeout=10).read().decode())  # noqa: S310 - fixed loopback URL

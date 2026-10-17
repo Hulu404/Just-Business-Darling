@@ -6,11 +6,13 @@ INSERT», где между двумя запросами успевает пр�
 """
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.models import Branch, Clinic, Contact, Doctor, Event, Patient
+from app.db.upsert import insert_unique
 from app.security.crypto import encrypt_phone, hash_phone
 
 
@@ -23,19 +25,9 @@ class EventRepository:
             select(Event).where(Event.event_id == event_id)
         ).scalar_one_or_none()
 
-    def add_event(self, event: Event) -> bool:
-        """Вставить событие. False — если такое event_id уже есть (дубль).
-
-        Ловим IntegrityError по уникальному индексу: это и есть защита от гонки
-        двух одинаковых вебхуков, пришедших почти одновременно.
-        """
-        self.session.add(event)
-        try:
-            self.session.flush()
-        except IntegrityError:
-            self.session.rollback()
-            return False
-        return True
+    def claim_event(self, event_id: str, **values) -> tuple[Event, bool]:
+        """Занять event_id до создания связанных объектов в той же транзакции."""
+        return insert_unique(self.session, Event, {"event_id": event_id}, **values)
 
 
 class DirectoryRepository:
@@ -45,28 +37,16 @@ class DirectoryRepository:
         self.session = session
 
     def get_or_create_branch(self, clinic_id: str, external_id: str) -> Branch:
-        branch = self.session.execute(
-            select(Branch).where(
-                Branch.clinic_id == clinic_id, Branch.external_id == external_id
-            )
-        ).scalar_one_or_none()
-        if branch is None:
-            branch = Branch(clinic_id=clinic_id, external_id=external_id)
-            self.session.add(branch)
-            self.session.flush()
+        branch, _ = insert_unique(
+            self.session, Branch, {"clinic_id": clinic_id, "external_id": external_id},
+        )
         return branch
 
     def get_or_create_doctor(self, clinic_id: str, external_id: str) -> Doctor:
-        doctor = self.session.execute(
-            select(Doctor).where(
-                Doctor.clinic_id == clinic_id, Doctor.external_id == external_id
-            )
-        ).scalar_one_or_none()
-        if doctor is None:
-            doctor = Doctor(clinic_id=clinic_id, external_id=external_id,
-                            full_name=f"Врач {external_id}")
-            self.session.add(doctor)
-            self.session.flush()
+        doctor, _ = insert_unique(
+            self.session, Doctor, {"clinic_id": clinic_id, "external_id": external_id},
+            full_name=f"Врач {external_id}",
+        )
         return doctor
 
 
@@ -75,16 +55,15 @@ class PatientRepository:
         self.session = session
 
     def get_or_create_patient(self, clinic_id: str, patient_token: str) -> Patient:
-        patient = self.session.execute(
-            select(Patient).where(
-                Patient.clinic_id == clinic_id, Patient.patient_token == patient_token
-            )
-        ).scalar_one_or_none()
-        if patient is None:
-            patient = Patient(clinic_id=clinic_id, patient_token=patient_token)
-            self.session.add(patient)
-            self.session.flush()
-        return patient
+        patient, _ = insert_unique(
+            self.session, Patient, {"clinic_id": clinic_id, "patient_token": patient_token},
+        )
+        # В PostgreSQL сериализуем контакт и первичное назначение группы пациента.
+        # В SQLite запись события уже удерживает блокировку записи транзакции.
+        return self.session.execute(
+            select(Patient).where(Patient.id == patient.id).with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one()
 
     def upsert_contact(self, patient_id: str, phone: str) -> Contact:
         """Телефон хранится зашифрованным; ищем по хэшу, не по открытому номеру."""
@@ -113,6 +92,18 @@ class ClinicRepository:
     def get_clinic(self, clinic_id: str) -> Clinic | None:
         return self.session.get(Clinic, clinic_id)
 
-    def first_clinic(self) -> Clinic | None:
-        """Демо-хелпер: пилотная клиника одна, берём первую активную."""
-        return self.session.execute(select(Clinic).limit(1)).scalar_one_or_none()
+    def integration_clinic(self) -> Clinic:
+        """В проде клиника задана явно; локально допускается ровно одна клиника."""
+        settings = get_settings()
+        if settings.mis_clinic_id:
+            clinic = self.get_clinic(settings.mis_clinic_id)
+        elif settings.environment in {"local", "test"}:
+            clinics = self.session.execute(select(Clinic).limit(2)).scalars().all()
+            clinic = clinics[0] if len(clinics) == 1 else None
+        else:
+            clinic = None
+        if clinic is None:
+            raise HTTPException(503, "Клиника интеграции не настроена. Проверьте MIS_CLINIC_ID.")
+        if not clinic.service_enabled:
+            raise HTTPException(403, "Приём событий для клиники выключен.")
+        return clinic

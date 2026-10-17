@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class IngestStatus(StrEnum):
@@ -22,6 +23,8 @@ class ResultsReadyEvent(BaseModel):
     Полей результатов анализа здесь нет и быть не должно — приходят только
     идентификаторы и время.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     event_id: str = Field(..., min_length=1, max_length=128)
     branch_id: str = Field(..., min_length=1, max_length=64)
@@ -48,10 +51,13 @@ class IngestResult(BaseModel):
 
 
 class VisitRow(BaseModel):
-    patient_token: str = Field(..., min_length=1)
+    patient_token: str = Field(..., min_length=1, max_length=128)
     visit_date: datetime
-    paid_amount: str | None = None
-    doctor_id: str | None = None
+    paid_amount: Decimal | None = Field(
+        default=None, ge=0, le=Decimal("9999999999.99"), decimal_places=2,
+        allow_inf_nan=False,
+    )
+    doctor_id: str | None = Field(default=None, max_length=64)
 
 
 class CsvRowError(BaseModel):

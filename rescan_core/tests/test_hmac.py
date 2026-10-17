@@ -11,7 +11,7 @@ BODY = b'{"event_id":"e1"}'
 
 
 def test_valid_signature_passes():
-    sig = compute_signature(BODY, SECRET)
+    sig = compute_signature(BODY, SECRET, "1000")
     verify_signature(body=BODY, signature=sig, timestamp="1000",
                      secret=SECRET, ttl_seconds=300, now=1000)
 
@@ -24,7 +24,7 @@ def test_bad_signature_rejected():
 
 
 def test_stale_timestamp_rejected():
-    sig = compute_signature(BODY, SECRET)
+    sig = compute_signature(BODY, SECRET, "1000")
     with pytest.raises(HTTPException) as err:
         verify_signature(body=BODY, signature=sig, timestamp="1000",
                          secret=SECRET, ttl_seconds=300, now=9999)
@@ -34,4 +34,22 @@ def test_stale_timestamp_rejected():
 def test_missing_signature_rejected():
     with pytest.raises(HTTPException):
         verify_signature(body=BODY, signature=None, timestamp="1000",
+                         secret=SECRET, ttl_seconds=300, now=1000)
+
+
+def test_replacing_timestamp_does_not_refresh_signature():
+    signature = compute_signature(BODY, SECRET, "1000")
+    with pytest.raises(HTTPException) as err:
+        verify_signature(body=BODY, signature=signature, timestamp="9999",
+                         secret=SECRET, ttl_seconds=300, now=9999)
+    assert err.value.status_code == 401
+
+
+def test_legacy_body_only_signature_is_rejected():
+    import hashlib
+    import hmac
+
+    signature = hmac.new(SECRET.encode(), BODY, hashlib.sha256).hexdigest()
+    with pytest.raises(HTTPException):
+        verify_signature(body=BODY, signature=signature, timestamp="1000",
                          secret=SECRET, ttl_seconds=300, now=1000)

@@ -20,7 +20,10 @@ EXPECTED_COLUMNS = {"patient_token", "visit_date", "paid_amount", "doctor_id"}
 
 def parse_visits_csv(content: bytes) -> tuple[list[VisitRow], list[CsvRowError]]:
     """Вернуть (валидные строки, ошибки). Никогда не бросает на плохой строке."""
-    text = content.decode("utf-8-sig")  # снимаем BOM из Excel-выгрузок
+    try:
+        text = content.decode("utf-8-sig")  # снимаем BOM из Excel-выгрузок
+    except UnicodeDecodeError:
+        return [], [CsvRowError(line_number=0, message="Сохраните CSV в кодировке UTF-8.")]
     reader = csv.DictReader(io.StringIO(text))
 
     rows: list[VisitRow] = []
@@ -44,12 +47,12 @@ def parse_visits_csv(content: bytes) -> tuple[list[VisitRow], list[CsvRowError]]
     for i, raw_row in enumerate(reader, start=2):  # строка 1 — заголовок
         try:
             visit_date = datetime.fromisoformat(raw_row["visit_date"].strip())
-            row = VisitRow(
-                patient_token=raw_row["patient_token"].strip(),
-                visit_date=visit_date,
-                paid_amount=(raw_row.get("paid_amount") or "").strip() or None,
-                doctor_id=(raw_row.get("doctor_id") or "").strip() or None,
-            )
+            row = VisitRow.model_validate({
+                "patient_token": raw_row["patient_token"].strip(),
+                "visit_date": visit_date,
+                "paid_amount": (raw_row.get("paid_amount") or "").strip() or None,
+                "doctor_id": (raw_row.get("doctor_id") or "").strip() or None,
+            })
             rows.append(row)
         except (ValidationError, ValueError, KeyError, AttributeError) as exc:
             errors.append(

@@ -1,16 +1,18 @@
 """Общие фикстуры pytest.
 
-Каждый тест получает СВОЮ чистую БД: отдельная SQLite-база в памяти через
-StaticPool, схема создаётся из моделей (Base.metadata.create_all). Это быстро,
-изолированно и не требует поднятого PostgreSQL при прогоне тестов.
+Каждый тест получает отдельную SQLite-базу или временную схему PostgreSQL,
+если задан RESCAN_TEST_DATABASE_URL. Сессии конкурентных запросов используют
+отдельные соединения; обычный прогон не требует запущенного PostgreSQL.
 """
 from __future__ import annotations
 
+import os
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 # ВАЖНО: импортируем модели ДО обращения к инстансу FastAPI, иначе имя пакета
 # `app` и имя инстанса `app` конфликтуют между собой.
@@ -23,13 +25,37 @@ from app.security.hmac import compute_signature
 
 
 @pytest.fixture
-def db_session():
-    """Чистая in-memory БД на тест + демо-клиника (приём событий без неё невозможен)."""
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def empty_engine(tmp_path):
+    """Изолированная БД/схема, включая отдельные соединения для тестов гонок."""
+    postgres_url = os.environ.get("RESCAN_TEST_DATABASE_URL")
+    if postgres_url:
+        schema = "test_" + uuid.uuid4().hex
+        admin = create_engine(postgres_url)
+        with admin.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_engine(postgres_url, connect_args={"options": f"-csearch_path={schema}"})
+    else:
+        engine = create_engine(
+            "sqlite+pysqlite:///" + (tmp_path / "test.sqlite3").as_posix(),
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
+
+        @event.listens_for(engine, "connect")
+        def enable_foreign_keys(connection, _):
+            connection.execute("PRAGMA foreign_keys=ON")
+
+    yield engine
+    engine.dispose()
+    if postgres_url:
+        with admin.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
+
+
+@pytest.fixture
+def db_session(empty_engine):
+    """Чистая БД на тест + демо-клиника."""
+    engine = empty_engine
     Base.metadata.create_all(engine)
     TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
@@ -46,7 +72,6 @@ def db_session():
 
     yield session
     session.close()
-    engine.dispose()
 
 
 @pytest.fixture
@@ -67,7 +92,7 @@ def sign_headers():
 
         timestamp = str(ts if ts is not None else int(time.time()))
         return {
-            "X-Rescan-Signature": compute_signature(body, secret),
+            "X-Rescan-Signature": compute_signature(body, secret, timestamp),
             "X-Rescan-Timestamp": timestamp,
             "Content-Type": "application/json",
         }

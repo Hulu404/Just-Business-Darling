@@ -232,7 +232,7 @@ class AuditEvent(IdMixin, Base):
     role: Mapped[str | None] = mapped_column(String(32))
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     entity: Mapped[str | None] = mapped_column(String(64))
-    entity_id: Mapped[str | None] = mapped_column(String(64))
+    entity_id: Mapped[str | None] = mapped_column(String(128))
     payload: Mapped[str | None] = mapped_column(Text)  # JSON без ПДн
 
 
