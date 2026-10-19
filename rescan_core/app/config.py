@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     # --- B3: группы ---
     pilot_salt: str = "dev-pilot-salt"  # noqa: S105
-    control_percent: int = Field(default=25, ge=0, le=100)
+    control_percent: int = Field(default=25, ge=0, le=50)
 
     # --- B11: защита контактов ---
     contact_encryption_key: str = "dev-encryption-key-change-me"  # noqa: S105
