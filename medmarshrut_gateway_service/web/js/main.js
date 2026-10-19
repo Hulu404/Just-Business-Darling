@@ -1,7 +1,7 @@
 /* Запуск: адрес окна задаёт роль и экран (#/staff/case), сессия роли создаётся в шлюзе, состояние сервисов — из /api/health */
 import { createSession, getHealth, sessionExtras } from './api.js';
 import { ACTIONS, PAGES } from './actions.js';
-import { render, renderBanner, renderShell } from './shell.js';
+import { HOME, render, renderBanner, renderShell } from './shell.js';
 import { freshState, health, hooks, sessions, setState, state, ui } from './state.js';
 import { installPathActions, isPathPage, pathAppointments, pathCase, pathHome, pathInbox, pathPlan, pathScheduling, refreshPath } from './path-ui.js';
 import { installPathExtra, pathAnalytics, pathRules, refreshPathExtra } from './path-extra.js';
@@ -21,6 +21,8 @@ Object.assign(PAGES, {home:pathHome, plan:pathPlan, appointments:pathAppointment
                       partners:partnersPage, incoming:incomingPage, referral:referralPage,
                       documents:() => documents() + documentsReferrals(),
                       analytics:() => pathAnalytics() + analyticsClinicBlock(), ...RESCAN_PAGES, ...PHONE_PAGES});
+/* rsVisits есть у врача («Приёмы») и у пациента («Мои записи»): экран выбирает роль окна */
+PAGES.rsVisits = (...args) => (state.role === 'patient' ? PHONE_PAGES : RESCAN_PAGES).rsVisits(...args);
 installPathActions(ACTIONS);
 installPathExtra(ACTIONS);
 installImagingActions(ACTIONS);
@@ -115,7 +117,7 @@ ACTIONS.healthRetry = () => { Object.assign(health, {status:'loading', data:null
 
 setState(freshState());
 const start = parseHash();
-if (start) Object.assign(state, start);
+Object.assign(state, start || {page:HOME[state.role]});  // без адреса — стартовый экран роли, а не прежняя главная
 if (location.hash !== hashOf()) history.replaceState(null, '', hashOf());  // нормализуем адрес (прежний экран врача → rsToday)
 window.addEventListener('popstate', applyRoute);
 render();
