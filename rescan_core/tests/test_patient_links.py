@@ -217,6 +217,7 @@ def production_values(**overrides) -> dict:
         "contact_encryption_key": "test-key-" + "c" * 32,
         "contact_hash_salt": "test-hash-" + "d" * 32,
         "patient_link_secret": "test-link-" + "e" * 32,
+        "crm_status_secret": "test-crm-" + "f" * 32,
         "staff_tokens": {},
         "mis_clinic_id": "test-clinic",
     }

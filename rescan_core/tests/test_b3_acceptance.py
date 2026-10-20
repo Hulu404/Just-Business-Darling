@@ -113,6 +113,7 @@ def production(**overrides):
         "contact_encryption_key": "qa-key-" + "c" * 32,
         "contact_hash_salt": "qa-hash-" + "d" * 32,
         "patient_link_secret": "qa-link-" + "e" * 32,
+        "crm_status_secret": "qa-crm-" + "e" * 32,
         "staff_tokens": {},
         "mis_clinic_id": "qa-clinic",
     }
