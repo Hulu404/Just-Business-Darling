@@ -5,6 +5,9 @@
 // Тексты — docs/rescan-pilot/design/p4-p8.md, раздел «Тексты», дословно.
 import { PATIENT } from './mocks-patient.js';
 
+/* Мок-токен, на котором api() имитирует обрыв сети: ApiError(0, 'network', …) до любого ответа */
+export const NETWORK_ERROR_TOKEN = 'demo-error-network';
+
 export const CARE_TEXTS = Object.freeze({
   "p7.entry": "Когда пересдавать",
   "p7.back": "Назад",

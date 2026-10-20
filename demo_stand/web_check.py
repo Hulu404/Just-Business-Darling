@@ -1,6 +1,7 @@
 """Browser checks of the web app on a running stand (Playwright). Run via `python start.py --web-check`."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -614,6 +615,480 @@ def check_pilot_staff(browser) -> list[str]:
     return failures
 
 
+# ---------- Пилот rescan (задание 19): P4–P8 и ошибки пациента на моках FE3/FE4 ----------
+# Подготовка идёт кликами (проверяем экран, а не дорогу к нему); путь P1 → P6 — отдельно, только клавиатурой.
+# Допущения о разметке: выбор врача на P4 — ссылка на #/p/<token>/request?doctor=<id> или кнопка внутри элемента
+# с data-doctor / data-doctor-id; на P5 сначала группа радиокнопок форматов (value = id формата), потом окон.
+PILOT_QA = r"""window.__qa = {
+  doctors() {
+    const view = document.querySelector('#view');
+    if (!view) return [];
+    const found = [...view.querySelectorAll("a[href*='/request'], [data-doctor], [data-doctor-id]")]
+      .map(e => e.matches('a[href], button') ? e : e.querySelector('a[href], button')).filter(Boolean);
+    return [...new Set(found)];
+  },
+  isDoctor() { return window.__qa.doctors().includes(document.activeElement); },
+  focusVisible() {
+    const shown = el => { if (!el) return false; const s = getComputedStyle(el);
+      return (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== 'none'; };
+    const e = document.activeElement;
+    return shown(e) || shown(e && e.closest('label'));
+  },
+  red() {
+    return [...document.querySelectorAll('#view *')].some(e => {
+      if (!e.getClientRects().length) return false;
+      const s = getComputedStyle(e);
+      return [s.color, s.backgroundColor].some(c => {
+        const m = (c.match(/[\d.]+/g) || []).map(Number);
+        return m.length >= 3 && m[3] !== 0 && m[0] >= 180 && m[1] < 110 && m[2] < 110;
+      });
+    });
+  },
+  async mock(token, path) {
+    try {
+      const mocks = await import(new URL('js/mocks.js', location.href).href);
+      const answer = mocks.respond('GET', path, undefined, {token});
+      return answer && answer.data ? answer.data : null;
+    } catch { return null; }
+  }
+};"""
+PILOT_FLOW = ("", "/step", "/goal", "/doctors")
+PILOT_REQUEST_TOKENS = ("demo-request-accepted", "demo-request-in-progress", "demo-request-booked", "demo-request-cancelled")
+PILOT_RETEST_TOKENS = ("demo-retest-before", "demo-retest-today", "demo-retest-overdue")
+PILOT_DATE = re.compile(r"\d{1,2}[\s ]+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)")
+PILOT_PRICE = re.compile(r"от[\s  ]*\d[\d\s  ]*₽")
+PILOT_EXCLAMATION = re.compile(r"[А-Яа-яЁё»)]\s*!")
+PILOT_FORBIDDEN = re.compile(r"(?i)(?<![\w-])(расшифров|риск|срочн|отклонени|диагноз)")
+PILOT_TEL = "#view a[href^='tel:']"
+PILOT_HAVE_BOOKING = "У меня уже есть запись"  # кнопка P8, решение дизайнера
+PILOT_NEW_REQUEST = "Оставить новую заявку"  # P6 в booked и cancelled → P3
+KEY_SUBMIT = "() => { const e = document.activeElement; return !!e && !!e.closest('#view') && e.matches('button[type=submit]:not([disabled])'); }"
+KEY_MAIN = "() => { const e = document.activeElement; return !!e && !!e.closest('#view') && e.matches('button.btn:not(.text):not([disabled])'); }"
+KEY_RADIO = "n => { const e = document.activeElement; return !!e && !!e.closest('#view') && e.matches('input[type=radio]') && (!n || e.name !== n); }"
+KEY_DOCTOR = "() => window.__qa.isDoctor()"
+PICK_FIRST = """() => { const names = new Set();
+  for (const r of document.querySelectorAll('#view input[type=radio]')) {
+    if (names.has(r.name)) continue; names.add(r.name);
+    if (!document.querySelector(`#view input[type=radio][name="${r.name}"]:checked`)) r.click(); } }"""
+
+
+class PilotStop(Exception):
+    """Дальше по сценарию идти нельзя: причина — в тексте."""
+
+
+def pilot_page(browser):
+    page = browser.new_page(viewport={"width": 390, "height": 800})
+    errors = watch(page)
+    page.add_init_script(PILOT_QA)
+    return page, errors
+
+
+def pilot_path(page) -> str:
+    return page.evaluate("() => location.hash.split('?')[0]")
+
+
+def pilot_wait(page, suffix: str) -> bool:
+    try:
+        page.wait_for_function("s => location.hash.split('?')[0].endsWith(s)", arg=suffix, timeout=8000)
+        wait_ready(page)
+        return True
+    except PlaywrightError:
+        return False
+
+
+def pilot_button(page, text: str):
+    return page.query_selector(f"#view :is(button, a):has-text('{text}')")
+
+
+def pilot_advance(page) -> None:
+    """Главное действие экрана с первым вариантом выбора (подготовка, не проверка)."""
+    path = pilot_path(page)
+    if path.endswith("/doctors"):
+        if not page.evaluate("() => { const d = window.__qa.doctors(); if (d[0]) d[0].click(); return d.length; }"):
+            raise PilotStop(f"{path}: нет ни одного врача для выбора")
+    else:
+        page.evaluate(PICK_FIRST)
+        button = (page.query_selector("#view form button[type=submit]:not([disabled])")
+                  or page.query_selector("#view button.btn:not(.text):not([disabled])"))
+        if button is None:
+            raise PilotStop(f"{path}: нет кнопки действия")
+        button.click()
+    page.wait_for_function("p => location.hash.split('?')[0] !== p", arg=path, timeout=8000)
+    wait_ready(page)
+
+
+def pilot_walk(page, token: str, target: str) -> None:
+    """Открыть #/p/<token>/<target>; если экран вернул назад (согласие, ветка, цель) — пройти шаги до него."""
+    problem = pilot_open(page, f"#/p/{token}/{target}")
+    if problem:
+        raise PilotStop(problem)
+    for _ in range(6):
+        path = pilot_path(page)
+        if path.endswith("/" + target):
+            return
+        if path.removeprefix(f"#/p/{token}") not in PILOT_FLOW:
+            raise PilotStop(f"до #/p/{token}/{target} не дошли: остановились на {path}")
+        pilot_advance(page)
+    raise PilotStop(f"до #/p/{token}/{target} не дошли за 6 шагов")
+
+
+def pilot_calm(page, label: str, *, still: bool = True) -> list[str]:
+    """Спокойный экран пациента: без красного, восклицаний, запрещённых слов, тикающих таймеров и полей ввода."""
+    failures = []
+    text = page.inner_text("#view")
+    if page.evaluate("() => window.__qa.red()"):
+        failures.append(f"{label}: красный на экране пациента")
+    if PILOT_EXCLAMATION.search(text):
+        failures.append(f"{label}: восклицание в тексте")
+    if PILOT_FORBIDDEN.search(text):
+        failures.append(f"{label}: запрещённое слово «{PILOT_FORBIDDEN.search(text).group(0)}»")
+    if page.query_selector(PILOT_FREE_INPUT):
+        failures.append(f"{label}: поле свободного ввода")
+    if still:
+        page.wait_for_timeout(1200)
+        if page.inner_text("#view") != text:
+            failures.append(f"{label}: текст меняется сам (таймер?)")
+    return failures
+
+
+def pilot_steps(page, errors: list[str], steps) -> list[str]:
+    """Шаги (подпись, функция page → список проблем); после каждого — общее: консоль, CSP, «демо», ширины."""
+    failures = []
+    for label, step in steps:
+        before = len(errors)
+        try:
+            failures += [f"{label}: {p}" for p in step(page)]
+            failures += pilot_common(page, label, errors, before)
+        except PilotStop as stop:
+            failures.append(f"{label}: {stop}")
+        except PlaywrightError as exc:
+            failures.append(f"{label}: {str(exc).splitlines()[0]}")
+    if page.evaluate("() => localStorage.length + sessionStorage.length"):
+        failures.append("пилот пишет в хранилище браузера")
+    return failures
+
+
+# --- P4–P6 (FE3) ---
+
+def p4_doctors(page) -> list[str]:
+    pilot_walk(page, "demo-step-discuss", "doctors")
+    failures = pilot_calm(page, "P4", still=False)
+    count = page.evaluate("() => window.__qa.doctors().length")
+    if count < 3:
+        failures.append(f"врачей {count}, ждали минимум три (ordering, visited, без метки)")
+    text = page.inner_text("#view")
+    mock = page.evaluate("t => window.__qa.mock(t, '/patient/doctors')", "demo-step-discuss")
+    names = [d["name"] for d in (mock or {}).get("doctors", [])]
+    places = [text.find(name) for name in names]
+    if names and (-1 in places or places != sorted(places)):
+        failures.append("порядок карточек не как в ответе GET /patient/doctors")
+    if not PILOT_PRICE.search(text):
+        failures.append("нет цены «от N ₽»")
+    if page.evaluate("() => [...document.querySelectorAll('#view img')].some(i => new URL(i.src, location.href).origin !== location.origin)"):
+        failures.append("фото врача не с того же источника")
+    return failures
+
+
+def p4_empty(page) -> list[str]:
+    pilot_walk(page, "demo-no-doctors", "doctors")
+    failures = pilot_calm(page, "P4 пусто", still=False)
+    if page.evaluate("() => window.__qa.doctors().length"):
+        failures.append("пустой список, а карточки врачей есть")
+    if not page.query_selector(PILOT_TEL):
+        failures.append("пустой список без кнопки звонка в клинику")
+    return failures
+
+
+def p5_request(page) -> list[str]:
+    pilot_walk(page, "demo-step-discuss", "doctors")
+    pilot_advance(page)
+    if not pilot_path(page).endswith("/request"):
+        raise PilotStop(f"выбор врача открыл {pilot_path(page)}, ждали /request")
+    failures = pilot_calm(page, "P5", still=False)
+    groups = page.evaluate("() => new Set([...document.querySelectorAll('#view input[type=radio]')].map(r => r.name)).size")
+    if groups < 2:
+        failures.append(f"групп выбора {groups}, ждали формат и окно времени")
+    text = page.inner_text("#view")
+    if "₽" not in text:
+        failures.append("у форматов нет цены")
+    if "администратор" not in text.lower():
+        failures.append("нет подписи, что запись подтвердит администратор клиники")
+    if not page.query_selector("#view button[type=submit]"):
+        failures.append("нет кнопки «Оставить заявку»")
+    return failures
+
+
+def p5_payment(page) -> list[str]:
+    pilot_walk(page, "demo-paid-format", "doctors")
+    pilot_advance(page)
+    formats = page.evaluate("t => window.__qa.mock(t, '/patient/formats')", "demo-paid-format") or {}
+    paid = [f["id"] for f in formats.get("formats", []) if f.get("has_payment")]
+    page.evaluate(PICK_FIRST)
+    radio = paid and page.query_selector(f"#view input[type=radio][value='{paid[0]}']")
+    if radio:
+        radio.check()
+    page.click("#view button[type=submit]")
+    try:
+        link = page.wait_for_selector("#view a[target='_blank']", timeout=8000)
+    except PlaywrightError:
+        return [f"после заявки с оплатой нет ссылки «Оплатить на сайте клиники» (открыт {pilot_path(page)})"]
+    href, rel = link.get_attribute("href") or "", (link.get_attribute("rel") or "").split()
+    failures = [] if href.startswith("https://") else [f"ссылка оплаты не https: {href[:40]}"]
+    if not {"noopener", "noreferrer"} <= set(rel):
+        failures.append(f"у ссылки оплаты rel={' '.join(rel)!r}, ждали noopener noreferrer")
+    return failures
+
+
+def p6_statuses(page) -> list[str]:
+    failures, texts = [], set()
+    for token in PILOT_REQUEST_TOKENS:
+        problem = pilot_open(page, f"#/p/{token}/status")
+        if problem or not pilot_path(page).endswith("/status"):
+            failures.append(f"{token}: P6 не открылся ({problem or pilot_path(page)})")
+            continue
+        failures += pilot_calm(page, token)
+        if not page.query_selector(PILOT_TEL):
+            failures.append(f"{token}: нет кнопки звонка в клинику")
+        texts.add(page.inner_text("#view"))
+        final = token in {"demo-request-booked", "demo-request-cancelled"}
+        again = pilot_button(page, PILOT_NEW_REQUEST)
+        if final and again is None:
+            failures.append(f"{token}: нет кнопки «{PILOT_NEW_REQUEST}»")
+        elif final:
+            again.click()
+            if not pilot_wait(page, "/goal"):
+                failures.append(f"{token}: «{PILOT_NEW_REQUEST}» открыл {pilot_path(page)}, ждали P3")
+        elif again is not None:
+            failures.append(f"{token}: заявка ещё в работе, а кнопка «{PILOT_NEW_REQUEST}» есть")
+    if len(texts) < len(PILOT_REQUEST_TOKENS):
+        failures.append("четыре статуса заявки показывают одинаковый текст")
+    return failures
+
+
+def p6_redirects(page) -> list[str]:
+    """P1 и P4 ведут на P6 только при заявке accepted и in_progress."""
+    failures = []
+    for token in ("demo-request-accepted", "demo-request-in-progress"):
+        pilot_open(page, f"#/p/{token}/doctors")
+        if not pilot_wait(page, "/status"):
+            failures.append(f"{token}: P4 открыл {pilot_path(page)}, ждали P6")
+        pilot_open(page, f"#/p/{token}")
+        page.click("#view form button[type=submit]")
+        if not pilot_wait(page, "/status"):
+            failures.append(f"{token}: P1 после входа открыл {pilot_path(page)}, ждали P6")
+    for token in ("demo-request-booked", "demo-request-cancelled"):
+        pilot_open(page, f"#/p/{token}")
+        page.click("#view form button[type=submit]")
+        page.wait_for_timeout(600)
+        wait_ready(page)
+        if pilot_path(page).endswith("/status"):
+            failures.append(f"{token}: P1 увёл на P6, а заявка завершена")
+    return failures
+
+
+def check_pilot_booking(browser) -> list[str]:
+    """P4 (врачи, пусто), P5 (формат и окно, оплата), P6 в четырёх статусах, переходы на P6 при заявке."""
+    page, errors = pilot_page(browser)
+    failures = pilot_steps(page, errors, [
+        ("P4 врачи, demo-step-discuss", p4_doctors), ("P4 пусто, demo-no-doctors", p4_empty),
+        ("P5 заявка, demo-step-discuss", p5_request), ("P5 оплата, demo-paid-format", p5_payment),
+        ("P6 статусы demo-request-*", p6_statuses), ("P1 и P4 при заявке ведут на P6", p6_redirects)])
+    page.close()
+    return failures
+
+
+# --- P7, P8 и ошибки (FE4) ---
+
+def pilot_book_button(page, label: str) -> list[str]:
+    button = pilot_button(page, "Записаться")
+    if button is None:
+        return [f"{label}: нет кнопки «Записаться»"]
+    button.click()
+    return [] if pilot_wait(page, "/goal") else [f"{label}: «Записаться» открыл {pilot_path(page)}, ждали P3"]
+
+
+def p7_retest(page) -> list[str]:
+    failures, texts = [], set()
+    for token in PILOT_RETEST_TOKENS:
+        problem = pilot_open(page, f"#/p/{token}/retest")
+        if token == "demo-retest-before" and "Ссылка не найдена" in page.inner_text("#view"):
+            token = "demo-step-retest"  # контракт: «demo-retest-before (можно расширить demo-step-retest)»
+            problem = pilot_open(page, f"#/p/{token}/retest")
+        if problem or not pilot_path(page).endswith("/retest"):
+            failures.append(f"{token}: P7 не открылся ({problem or pilot_path(page)})")
+            continue
+        text = page.inner_text("#view")
+        texts.add(text)
+        if not PILOT_DATE.search(text):
+            failures.append(f"{token}: нет даты пересдачи вида «17 ноября»")
+        failures += pilot_calm(page, token)
+        failures += pilot_book_button(page, token)
+    if len(texts) < len(PILOT_RETEST_TOKENS):
+        failures.append("состояния before, today и overdue показывают одинаковый текст")
+    return failures
+
+
+def p2_to_retest(page) -> list[str]:
+    pilot_open(page, "#/p/demo-step-retest/step")
+    button = pilot_button(page, "Когда пересдавать")
+    if button is None:
+        return ["у P2 с пересдачей нет кнопки «Когда пересдавать»"]
+    button.click()
+    return [] if pilot_wait(page, "/retest") else [f"«Когда пересдавать» открыл {pilot_path(page)}, ждали P7"]
+
+
+def p8_after(page) -> list[str]:
+    pilot_open(page, "#/p/demo-after-visit/after")
+    failures = pilot_calm(page, "P8")
+    if "демо" not in page.inner_text("#view").lower():
+        failures.append("на экране P8 нет пометки «демо»")
+    booked = pilot_button(page, PILOT_HAVE_BOOKING)
+    if booked is None:
+        failures.append(f"нет кнопки «{PILOT_HAVE_BOOKING}»")
+    else:
+        booked.click()
+        try:
+            page.wait_for_selector("#view :text('Хорошо, напоминать не будем')", timeout=8000)
+        except PlaywrightError:
+            failures.append(f"после «{PILOT_HAVE_BOOKING}» нет «Хорошо, напоминать не будем»")
+    pilot_open(page, "#/p/demo-after-visit/after")
+    return failures + pilot_book_button(page, "P8")
+
+
+def p8_booked(page) -> list[str]:
+    pilot_open(page, "#/p/demo-after-booked/after")
+    failures = pilot_calm(page, "P8 записан")
+    if pilot_button(page, PILOT_HAVE_BOOKING):
+        failures.append(f"пациент уже записан, а кнопка «{PILOT_HAVE_BOOKING}» осталась")
+    return failures
+
+
+def error_screen(token: str, expected: str, retry: bool):
+    def step(page) -> list[str]:
+        pilot_open(page, f"#/p/{token}")
+        text = page.inner_text("#view")
+        failures = [] if expected in text else [f"нет «{expected}»"]
+        failures += pilot_calm(page, token, still=False)
+        has_retry = pilot_button(page, "Повторить") is not None
+        if has_retry != retry:
+            failures.append("нет кнопки «Повторить»" if retry else "лишняя кнопка «Повторить»")
+        if retry and has_retry:
+            pilot_button(page, "Повторить").click()
+            page.wait_for_timeout(600)
+            wait_ready(page)
+            if expected not in page.inner_text("#view"):
+                failures.append(f"после «Повторить» пропало «{expected}»")
+        return failures
+    return step
+
+
+def error_redirect(address: str, suffix: str):
+    def step(page) -> list[str]:
+        pilot_open(page, address)
+        return [] if pilot_wait(page, suffix) else [f"открылся {pilot_path(page)}, ждали …{suffix}"]
+    return step
+
+
+def check_pilot_care(browser) -> list[str]:
+    """P7 в трёх состояниях и переход с P2, P8 (обе ветки), каждая ошибка пациента из таблицы контракта."""
+    page, errors = pilot_page(browser)
+    failures = pilot_steps(page, errors, [
+        ("P7 пересдача", p7_retest), ("P2 → P7", p2_to_retest),
+        ("P8 после визита", p8_after), ("P8 уже записан", p8_booked),
+        ("404 link_not_found", error_screen("demo-unknown-link", "Ссылка не найдена", False)),
+        ("503 not_configured", error_screen("demo-not-configured", "ещё не настроена", False)),
+        ("сеть", error_screen("demo-error-network", "Нет связи", True)),
+        ("500", error_screen("demo-error-500", "", True)),
+        ("409 consent_required → P1", error_redirect("#/p/demo-consent/doctors", "/p/demo-consent")),
+        ("409 choice_required → P3", error_redirect("#/p/demo-step-discuss/doctors", "/goal")),
+        ("409 not_active → P1", error_redirect("#/p/demo-expired/doctors", "/p/demo-expired"))])
+    page.close()
+    return failures
+
+
+# --- путь P1 → P6 с клавиатуры ---
+
+def press_to(page, predicate: str, arg=None, limit: int = 40) -> bool:
+    for _ in range(limit):
+        page.keyboard.press("Tab")
+        if page.evaluate(predicate, arg):
+            return True
+    return False
+
+
+def key_act(page, predicate: str, what: str, key: str = "Enter", arg=None) -> list[str]:
+    if not press_to(page, predicate, arg):
+        raise PilotStop(f"{what}: не дойти клавишей Tab")
+    seen = page.evaluate("() => window.__qa.focusVisible()")
+    page.keyboard.press(key)
+    return [] if seen else [f"{what}: фокус не виден"]
+
+
+def key_wait(page, suffix: str, what: str) -> None:
+    if not pilot_wait(page, suffix):
+        raise PilotStop(f"{what} открыл {pilot_path(page)}, ждали …{suffix}")
+
+
+def key_request(page, token: str) -> list[str]:
+    """P5: формат без оплаты стрелками, окно, «Оставить заявку»."""
+    if not press_to(page, KEY_RADIO):
+        raise PilotStop("P5 формат: не дойти клавишей Tab")
+    formats = page.evaluate("t => window.__qa.mock(t, '/patient/formats')", token) or {}
+    paid = {f["id"] for f in formats.get("formats", []) if f.get("has_payment")}
+    group = page.evaluate("() => document.activeElement.name")
+    for _ in range(10):
+        if page.evaluate("() => document.activeElement.value") not in paid:
+            break
+        page.keyboard.press("ArrowDown")
+    failures = [] if page.evaluate("() => window.__qa.focusVisible()") else ["P5 формат: фокус не виден"]
+    page.keyboard.press("Space")
+    failures += key_act(page, KEY_RADIO, "P5 окно", "Space", arg=group)
+    return failures + key_act(page, KEY_SUBMIT, "P5 «Оставить заявку»")
+
+
+def key_path(page, token: str) -> list[str]:
+    problem = pilot_open(page, f"#/p/{token}")
+    if problem:
+        raise PilotStop(problem)
+    failures = key_act(page, KEY_SUBMIT, "P1")
+    key_wait(page, "/step", "P1")
+    if page.query_selector("#view input[type=radio]"):
+        failures += key_act(page, KEY_RADIO, "P2 ветка", "Space") + key_act(page, KEY_SUBMIT, "P2")
+    else:
+        failures += key_act(page, KEY_MAIN, "P2")
+    key_wait(page, "/goal", "P2")
+    failures += key_act(page, KEY_RADIO, "P3 цель", "Space") + key_act(page, KEY_SUBMIT, "P3")
+    key_wait(page, "/doctors", "P3")
+    failures += key_act(page, KEY_DOCTOR, "P4 врач")
+    key_wait(page, "/request", "P4")
+    request_hash = page.evaluate("() => location.hash")
+    failures += key_request(page, token)
+    key_wait(page, "/status", "P5")
+    if not page.query_selector(PILOT_TEL):
+        failures.append("P6: нет кнопки звонка в клинику")
+    return failures + key_repeat(page, request_hash)
+
+
+def key_repeat(page, request_hash: str) -> list[str]:
+    """Повторная заявка того же эпизода (409 request_exists) приводит на P6."""
+    page.evaluate("h => { location.hash = h; }", request_hash)
+    page.wait_for_timeout(400)
+    wait_ready(page)
+    if pilot_path(page).endswith("/request"):
+        page.evaluate(PICK_FIRST)
+        page.click("#view button[type=submit]")
+    return [] if pilot_wait(page, "/status") else [f"повторная заявка: открыт {pilot_path(page)}, ждали P6 (request_exists)"]
+
+
+def check_pilot_keyboard(browser) -> list[str]:
+    """Путь P1 → P6 только с клавиатуры (Tab, пробел, стрелки, Enter), видимый фокус; повторная заявка → P6."""
+    page, errors = pilot_page(browser)
+    failures = pilot_steps(page, errors, [(f"клавиатура, {token}", lambda p, t=token: key_path(p, t))
+                                          for token in ("demo-step-discuss", "demo-active")])
+    page.close()
+    return failures
+
+
 def masked(image: Image.Image, boxes: list[tuple[int, int, int, int]]) -> Image.Image:
     image = image.convert("RGB")
     draw = ImageDraw.Draw(image)
@@ -682,7 +1157,10 @@ def main() -> int:
                       ("Кабинет rescan, «Пациенты»: Мария К. получает план врача, запись в анамнез видна после обновления", check_rescan_patients),
                       ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral),
                       ("Пилот rescan, пациент: P1 в четырёх состояниях и с согласием, P2 и P3, тема клиники B, 360/390/1280 px", check_pilot_patient),
-                      ("Пилот rescan, сотрудники: вход врача и руководителя, неверный логин, 360/390/1280 px", check_pilot_staff)]
+                      ("Пилот rescan, сотрудники: вход врача и руководителя, неверный логин, 360/390/1280 px", check_pilot_staff),
+                      ("Пилот rescan, P4–P6: врачи, пусто, заявка, оплата, четыре статуса, переходы на P6, 360/390/1280 px", check_pilot_booking),
+                      ("Пилот rescan, P7–P8 и ошибки пациента: три состояния пересдачи, после визита, 404/503/сеть/500/409, 360/390/1280 px", check_pilot_care),
+                      ("Пилот rescan, путь P1 → P6 с клавиатуры, видимый фокус, повторная заявка → P6", check_pilot_keyboard)]
             for title, check in checks:
                 failures = check(browser)
                 results.append(not failures)

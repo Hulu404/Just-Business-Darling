@@ -31,7 +31,8 @@ def test_all_transitions(client, sign_headers, db_session, application, old, new
     request.status = old
     db_session.commit()
     allowed = old == new or new in {
-        "new": {"cancelled"}, "sent": {"in_progress", "cancelled"},
+        "new": {"in_progress", "booked", "cancelled"},
+        "sent": {"in_progress", "booked", "cancelled"},
         "in_progress": {"booked", "cancelled"}, "booked": set(), "cancelled": set(),
     }[old]
     if manual:

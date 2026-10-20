@@ -30,9 +30,11 @@ from app.services.crm_transports import DeliveryError, http_send
 
 Send = Callable[[str, dict[str, str], dict[str, Any]], str | None]
 RETRY_MINUTES = (1, 5, 15, 60)
+# Вперёд по цепочке можно через шаг: после notify заявка остаётся new, а администратор
+# записывает пациента сам. Конечны только booked и cancelled.
 TRANSITIONS = {
-    "new": {"cancelled"},
-    "sent": {"in_progress", "cancelled"},
+    "new": {"in_progress", "booked", "cancelled"},
+    "sent": {"in_progress", "booked", "cancelled"},
     "in_progress": {"booked", "cancelled"},
     "booked": set(),
     "cancelled": set(),
@@ -206,7 +208,8 @@ def deliver_pending(session: Session, now: datetime, send: Send = http_send) -> 
         for row_id in ids:
             row = session.scalar(update(Outbox).where(Outbox.id == row_id, *ready)
                                  .values(status="processing").returning(Outbox)
-                                 .execution_options(populate_existing=True))
+                                 .execution_options(populate_existing=True,
+                                                    synchronize_session=False))
             if row is None:
                 continue
             claimed += 1

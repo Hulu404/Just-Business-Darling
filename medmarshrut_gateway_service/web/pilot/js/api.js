@@ -3,11 +3,10 @@
    Режим live подключим, когда появится API пациента (B6) и вход сотрудников через сессию шлюза (FE5/FE6).
    Токен пациента экран не передаёт: роутер кладёт его сюда из адреса (#/p/<token>) через useToken(). */
 import { respond } from './mocks.js';
+import { NETWORK_ERROR_TOKEN } from './mocks-care.js';
 
 export const MODE = 'mock';
 const MOCK_DELAY_MS = 180;
-/* Мок-токен, на котором api() имитирует обрыв сети: ApiError(0, 'network', …) до любого ответа */
-const NETWORK_ERROR_TOKEN = 'demo-error-network';
 
 export class ApiError extends Error {
   constructor(status, code, message){

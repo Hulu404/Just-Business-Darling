@@ -396,9 +396,10 @@ status = pending` забирает запись, блокировка удерж
 
 Ошибки — в формате B6: `{"detail": {"code": "…", "message": "…"}}`.
 
-Переходы: `new → sent → in_progress → booked`; `sent` устанавливает только
-доставка. Из `new`, `sent`, `in_progress` допустим `cancelled`. `booked` и
-`cancelled` конечные. Аудит `crm.status_changed`, actor и role — `crm`,
+Переходы: `new → sent → in_progress → booked`, вперёд можно через шаг
+(после `notify` заявка остаётся `new`, администратор записывает пациента сам);
+`sent` устанавливает только доставка. Из `new`, `sent`, `in_progress` допустим
+`cancelled`. `booked` и `cancelled` конечные. Аудит `crm.status_changed`, actor и role — `crm`,
 payload содержит только прежний и новый статусы.
 
 ### POST /v1/admin/requests/{request_id}/status
