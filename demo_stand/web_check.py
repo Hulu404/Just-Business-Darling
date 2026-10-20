@@ -23,7 +23,7 @@ SCREENS = [
     ("patient", "rsProfile"),
     ("staff", "inbox"), ("staff", "case"), ("staff", "scheduling"), ("staff", "requests"), ("staff", "comms"),
     ("staff", "partners"), ("staff", "pharmacyAdmin"), ("staff", "rules"), ("staff", "analytics"),
-    ("patient", "services"), ("staff", "services"),
+    ("staff", "services"),
     ("partner", "incoming"), ("partner", "services"),
     # rescan doctor cabinet (task 12): the only doctor screens after the switch-over (cycle 9)
     ("doctor", "rsToday"), ("doctor", "rsStudies"), ("doctor", "rsPatients"), ("doctor", "rsVisits"), ("doctor", "rsSettings"),
@@ -107,14 +107,14 @@ def check_screens(browser) -> list[str]:
         failures.append("«Назад» не вернул на предыдущий экран")
     page.go_forward()
     page.wait_for_function("() => location.hash === '#/staff/scheduling'")
-    # jumps from «Карта сервисов» open the right role and screen
-    open_screen(page, "patient", "services")
+    # jumps from «Карта сервисов» open the right role and screen (у пациента карты больше нет, задание 13)
+    open_screen(page, "staff", "services")
     page.click('[data-jump="staff:partners:refs"] >> nth=0')
     wait_ready(page)
     if page.evaluate("() => location.hash") != "#/staff/partners" or page.inner_text("#topbar strong") != "Партнёры":
         failures.append("переход staff:partners открыл " + page.evaluate("() => location.hash"))
     # «Глазами врача» ведёт в кабинет rescan: прежних экранов врача больше нет
-    open_screen(page, "patient", "services")
+    open_screen(page, "staff", "services")
     page.click('[data-jump="doctor:rsStudies"] >> nth=0')
     wait_ready(page)
     if page.evaluate("() => location.hash") != "#/doctor/rsStudies" or "Исследования" not in page.inner_text("#view"):
@@ -446,6 +446,172 @@ def check_referral(browser) -> list[str]:
     return failures
 
 
+# ---------- Пилот rescan (задание 18): отдельная точка входа /assets/pilot/index.html, данные — моки FE1/FE2 ----------
+PILOT = APP + "/assets/pilot/index.html"
+PILOT_WIDTHS = (360, 390, 1280)
+PILOT_PATIENT = [  # (адрес, что проверить сверх общего)
+    ("#/p/demo-active", "entry"), ("#/p/demo-consent", "consent"),
+    ("#/p/demo-expired", "closed"), ("#/p/demo-stopped", "closed"), ("#/p/demo-unsubscribed", "closed"),
+    ("#/p/demo-step-discuss/step", "doctor_step"), ("#/p/demo-step-retest/step", "retest"),
+    ("#/p/demo-step-followup/step", "doctor_step"), ("#/p/demo-active/step", "branches"),
+    ("#/p/demo-active/goal", "goals"), ("#/p/demo-active/next", "stub"),
+]
+PILOT_STAFF = ["#/staff/login", "#/doctor", "#/clinic"]
+PILOT_BAD_LOGIN = "Логин или пароль не подошли. Проверьте и попробуйте ещё раз"
+# Контраст --clinic-accent с белым: ниже 4,5:1 тема обязана подставить наш акцент (клиника B)
+PILOT_CONTRAST = """() => {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--clinic-accent').trim();
+  const probe = document.createElement('i'); probe.style.color = raw; document.body.append(probe);
+  const rgb = (getComputedStyle(probe).color.match(/\\d+(\\.\\d+)?/g) || []).slice(0, 3).map(Number); probe.remove();
+  if (!raw || rgb.length < 3) return null;
+  const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const L = 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+  return {accent: raw, ratio: 1.05 / (L + 0.05),
+          name: getComputedStyle(document.documentElement).getPropertyValue('--clinic-name').trim()};
+}"""
+PILOT_CHOICES = ("() => document.querySelectorAll('#view button:not([disabled]), #view a[href], "
+                 "#view input[type=radio], #view [role=radio]').length")
+PILOT_FREE_INPUT = "#view textarea, #view [contenteditable], #view input:not([type=radio]):not([type=checkbox]):not([type=hidden])"
+
+
+def pilot_open(page, address: str) -> str | None:
+    """Открыть адрес пилота с нуля (полная загрузка, не смена hash); вернуть текст ошибки или None."""
+    page.goto("about:blank")
+    response = page.goto(PILOT + address)
+    if response is None or response.status != 200:
+        return f"страница пилота {PILOT} не открылась: {response.status if response else 'нет ответа'} (ждём FE1/FE2)"
+    wait_ready(page)
+    return None
+
+
+def pilot_common(page, address: str, errors: list[str], before: int) -> list[str]:
+    """Общее для каждого экрана пилота: консоль, CSP, плашка «демо», прокрутка на 360/390/1280."""
+    failures = []
+    csp = page.evaluate("() => window.__mmCsp.splice(0)")
+    if len(errors) > before or csp:
+        failures.append(f"{address}: {'; '.join(errors[before:] + csp)}")
+    if "демо" not in page.inner_text("body").lower():
+        failures.append(f"{address}: нет плашки «демо»")
+    for width in PILOT_WIDTHS:
+        page.set_viewport_size({"width": width, "height": 800})
+        overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        if overflow > 0:
+            failures.append(f"{width}px {address}: шире экрана на {overflow}px")
+    page.set_viewport_size({"width": 390, "height": 800})
+    return failures
+
+
+def pilot_patient_screen(page, address: str, kind: str) -> list[str]:
+    failures = []
+    text = page.inner_text("#view")
+    if page.query_selector(PILOT_FREE_INPUT):
+        failures.append(f"{address}: поле свободного ввода на экране пациента")
+    if kind == "closed" and page.query_selector("#view button:has-text('Повторить')"):
+        failures.append(f"{address}: кнопка «Повторить» у закрытой ссылки")
+    if kind == "closed" and not any(ch.isdigit() for ch in text):
+        failures.append(f"{address}: нет телефона клиники — что делать дальше")
+    if kind in {"doctor_step", "retest"} and "Ваш врач предлагает" not in text:
+        failures.append(f"{address}: нет «Ваш врач предлагает…»")
+    if kind == "retest" and not any(ch.isdigit() for ch in text):
+        failures.append(f"{address}: в пересдаче нет числа недель")
+    if kind == "branches" and page.evaluate(PILOT_CHOICES) < 3:
+        failures.append(f"{address}: меньше трёх веток")
+    if kind == "goals" and page.evaluate(PILOT_CHOICES) < 4:
+        failures.append(f"{address}: меньше четырёх целей")
+    if kind == "consent" and page.evaluate(PILOT_CHOICES) < 1:
+        failures.append(f"{address}: нет действия «согласен»")
+    return failures
+
+
+def pilot_theme(page, address: str, themes: dict) -> list[str]:
+    theme = page.evaluate(PILOT_CONTRAST)
+    if not theme:
+        return [f"{address}: тема клиники не применена (--clinic-accent пуст)"]
+    themes[address] = theme
+    if theme["ratio"] < 4.5:
+        return [f"{address}: акцент {theme['accent']} с белым {theme['ratio']:.2f}:1 — не подставлен наш"]
+    return []
+
+
+def check_pilot_patient(browser) -> list[str]:
+    """P1 в четырёх состояниях и с согласием, P2 с тремя шагами врача и с ветками, P3 и заглушка «Дальше»;
+    тема клиники: акцент на каждом экране проходит контраст 4,5:1, обе мок-клиники встречаются."""
+    page = browser.new_page(viewport={"width": 390, "height": 800})
+    errors = watch(page)
+    failures, themes = [], {}
+    for address, kind in PILOT_PATIENT:
+        before = len(errors)
+        try:
+            problem = pilot_open(page, address)
+            if problem:
+                failures.append(problem)
+                break
+            failures += pilot_patient_screen(page, address, kind)
+            failures += pilot_theme(page, address, themes)
+            failures += pilot_common(page, address, errors, before)
+        except PlaywrightError as exc:
+            failures.append(f"{address}: {str(exc).splitlines()[0]}")
+    if themes and len({t["name"] for t in themes.values()}) < 2:
+        failures.append("все мок-токены пациента открывают одну клинику: клиники B с подставленным акцентом нет")
+    page.close()
+    return failures
+
+
+def pilot_login(page, login: str, password: str) -> None:
+    """Вход с клавиатуры: Enter в поле пароля, как требует FE1."""
+    page.fill("#view input:not([type=password]):not([type=hidden]) >> nth=0", login)
+    page.fill("#view input[type=password]", password)
+    page.press("#view input[type=password]", "Enter")
+
+
+def pilot_staff_login(page, errors: list[str]) -> list[str]:
+    failures = []
+    for login, target in (("demo-doctor", "#/doctor"), ("demo-manager", "#/clinic")):
+        before = len(errors)
+        pilot_open(page, "#/staff/login")
+        pilot_login(page, login, "demo")
+        try:
+            page.wait_for_function(f"() => location.hash === '{target}'", timeout=8000)
+            wait_ready(page)
+        except PlaywrightError:
+            failures.append(f"вход {login} открыл {page.evaluate('() => location.hash')}, ждали {target}")
+            continue
+        failures += pilot_common(page, f"{target} после входа {login}", errors, before)
+    before = len(errors)
+    pilot_open(page, "#/staff/login")
+    pilot_login(page, "demo-nobody", "wrong")
+    try:
+        page.wait_for_selector(f"#view :text('{PILOT_BAD_LOGIN}')", timeout=8000)
+    except PlaywrightError:
+        failures.append("неверный логин: нет «" + PILOT_BAD_LOGIN + "»")
+    if page.evaluate("() => location.hash") != "#/staff/login":
+        failures.append("неверный логин увёл со страницы входа")
+    failures += pilot_common(page, "#/staff/login, неверный логин", errors, before)
+    return failures
+
+
+def check_pilot_staff(browser) -> list[str]:
+    """Заглушки входа, #/doctor и #/clinic; вход врача и руководителя на свои заглушки, неверный логин."""
+    page = browser.new_page(viewport={"width": 390, "height": 800})
+    errors = watch(page)
+    failures = []
+    try:
+        for address in PILOT_STAFF:
+            before = len(errors)
+            problem = pilot_open(page, address)
+            if problem:
+                page.close()
+                return [problem]
+            failures += pilot_common(page, address, errors, before)
+        failures += pilot_staff_login(page, errors)
+        if page.evaluate("() => localStorage.length + sessionStorage.length"):
+            failures.append("пилот пишет в хранилище браузера")
+    except PlaywrightError as exc:
+        failures.append(str(exc).splitlines()[0])
+    page.close()
+    return failures
+
+
 def masked(image: Image.Image, boxes: list[tuple[int, int, int, int]]) -> Image.Image:
     image = image.convert("RGB")
     draw = ImageDraw.Draw(image)
@@ -512,7 +678,9 @@ def main() -> int:
                       ("Кабинет rescan, «Исследования»: предпросмотр по правилу, настоящие срезы, подтверждение, цепочка маршрута", check_rescan_imaging),
                       ("Кабинет rescan, «Приёмы»: запись пациента появляется у врача за 20 с без обновления, итог создаёт следующий шаг", check_rescan_visits),
                       ("Кабинет rescan, «Пациенты»: Мария К. получает план врача, запись в анамнез видна после обновления", check_rescan_patients),
-                      ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral)]
+                      ("Направление: координатор и партнёр в соседних окнах, ФИО после принятия, время партнёра, визит", check_referral),
+                      ("Пилот rescan, пациент: P1 в четырёх состояниях и с согласием, P2 и P3, тема клиники B, 360/390/1280 px", check_pilot_patient),
+                      ("Пилот rescan, сотрудники: вход врача и руководителя, неверный логин, 360/390/1280 px", check_pilot_staff)]
             for title, check in checks:
                 failures = check(browser)
                 results.append(not failures)
