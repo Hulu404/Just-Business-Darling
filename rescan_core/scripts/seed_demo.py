@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from alembic import command
@@ -22,6 +23,11 @@ from app.db.models import Clinic, Doctor, Format, Goal
 from app.db.session import engine, session_scope
 
 ROOT = Path(__file__).resolve().parent.parent
+DEMO_STEP_OPTIONS = json.dumps([
+    {"code": "discuss", "title": "Обсудить на приёме"},
+    {"code": "retest", "title": "Пересдать через несколько недель", "weeks": [2, 4, 8, 12]},
+    {"code": "followup", "title": "Прийти ко мне на контроль"},
+], ensure_ascii=False)
 
 
 def run_migrations() -> None:
@@ -40,7 +46,16 @@ def seed() -> None:
             session.add(clinic)
             session.flush()
 
-        if not session.query(Doctor).filter_by(clinic_id=clinic.id).first():
+        # B4: шаги врача, включённые демо-клиникой, и врач токена dev-doctor-token.
+        if not clinic.step_options:
+            clinic.step_options = DEMO_STEP_OPTIONS
+        if not session.query(Doctor).filter_by(clinic_id=clinic.id,
+                                               external_id="dev-doctor").first():
+            session.add(Doctor(clinic_id=clinic.id, external_id="dev-doctor",
+                               full_name="Демо-врач очереди", specialty="Терапевт"))
+
+        if not session.query(Doctor).filter_by(clinic_id=clinic.id,
+                                               external_id="doc-1").first():
             session.add_all([
                 Doctor(clinic_id=clinic.id, external_id="doc-1",
                        full_name="Иванова Анна Петровна", specialty="Терапевт"),

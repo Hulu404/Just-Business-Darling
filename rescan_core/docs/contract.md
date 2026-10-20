@@ -80,3 +80,78 @@ UTF-8 строки `pilot_salt:patient_token`, первые 8 hex-символо
 останавливает запуск с ошибкой, которая называет настройку и условие, но не
 печатает входные значения. В `local` и `test` разрешены демонстрационная и пустая
 соль. Соль хранится только в настройках сервера и не передаётся в браузер.
+
+## B4: очередь врача (зафиксирован 19.10.2026)
+
+Роль `doctor` (заголовок `X-Staff-Token`). Врач сотрудника — запись `doctors`
+с `external_id = actor_id` в клинике интеграции (та же, что принимает события).
+Порядок проверок: токен (401) → роль (403) → клиника интеграции (503) → врач
+(403, нет или неактивен) → клиника остановлена `service_enabled = false` (403)
+→ список шагов клиники (503).
+
+Статусы эпизода (`episodes.status`):
+
+| Статус | Когда |
+|---|---|
+| `awaiting_doctor` | основная группа после приёма события; в очереди своего врача |
+| `control` | контрольная группа; в очередь не попадает |
+| `doctor_marked` | врач отметил шаг |
+| `default_message` | 24 часа прошли без отметки |
+
+`episodes.queue_deadline_at` = время приёма события (UTC) + 24 часа, только для
+основной группы; у контрольной — `null`. Эпизоды до миграции остаются `open`.
+
+Список шагов: коды фиксированы — `discuss`, `retest`, `followup`. Клиника хранит
+подмножество в `clinics.step_options` (JSON-строка):
+
+```json
+[{"code": "discuss", "title": "Обсудить на приёме"},
+ {"code": "retest", "title": "Пересдать через несколько недель", "weeks": [2, 4, 8, 12]}]
+```
+
+`weeks` — только у `retest`, непустой список целых от 1 до 52 без повторов.
+Пусто (`null`, `""`, `[]`) или не по схеме — все три ручки отвечают `503`
+`{"detail": "Список шагов клиники не настроен."}`. Значений по умолчанию нет.
+
+### GET /v1/doctor/queue
+
+`200` + `{"server_time": "…Z", "items": [{"episode_id", "patient_token",
+"branch_name", "ready_at", "queue_deadline_at"}]}`. Только эпизоды этого врача
+в `awaiting_doctor`, со сроком позже `server_time`, без отписавшихся пациентов
+(`patients.opted_out`); по возрастанию `queue_deadline_at`. `branch_name` —
+`branches.name`, может быть `null` (МИС передаёт только id филиала). Пусто —
+`"items": []`. Телефона, ФИО и данных о здоровье нет.
+
+### GET /v1/doctor/step-options
+
+`200` + `{"options": [{"code", "title", "weeks"?}]}` — `weeks` только у `retest`.
+
+### POST /v1/doctor/episodes/{episode_id}/step
+
+Тело (`extra="forbid"`): `{"code": "retest", "retest_weeks": 4}`.
+
+- `201` + `{"episode_id", "step_id", "status": "doctor_marked"}`.
+- `404` — эпизода нет, он чужой, контрольной группы или пациент отписался.
+- `409` — уже отмечен, ушёл в `default_message` или срок прошёл.
+- `422` — неизвестный код, код выключен в клинике, `retest_weeks` не из списка,
+  не передан для `retest` или передан (даже `null`) для другого кода, лишние поля,
+  тело — массив. Ответ 422 обезличен: `{"detail": "Некорректная отметка шага.
+  Проверьте поля запроса."}` для ошибок схемы, без `input` и тела запроса.
+  Проверка тела идёт до поиска эпизода.
+
+Пишет `steps` (`kind = code`, `set_by_doctor_id`, `set_at`, `due_date = set_at +
+retest_weeks` для `retest`), аудит `doctor.step_marked` (actor — `actor_id`
+сотрудника, payload — `step_id`, `code`, `retest_weeks`) и `outbox` с
+`topic = "episode.doctor_marked"`, payload `{"episode_id", "step_id", "code",
+"retest_weeks"}`. Переход — условный `UPDATE … WHERE status = 'awaiting_doctor'
+AND queue_deadline_at > now`: из двух одновременных отметок или отметки и
+истечения проходит ровно одна. Массовой отметки нет.
+
+### Истечение срока
+
+`expire_overdue(session, now) -> int` в `app/services/queue_service.py` и
+`python -m scripts.expire_queue`. Эпизоды `awaiting_doctor` с
+`queue_deadline_at <= now` → `default_message`, `outbox` с
+`topic = "episode.default_message"`, payload `{"episode_id"}`, аудит
+`queue.expired` от `system`. Возвращает число переведённых эпизодов; повтор — `0`.
+`now` без пояса считается UTC. HTTP-ручки нет; планировщик — в B5.

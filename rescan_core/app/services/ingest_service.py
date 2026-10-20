@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.db.base import utcnow
 from app.db.models import Episode
 from app.repositories.event_repository import (
     ClinicRepository,
@@ -17,6 +18,7 @@ from app.repositories.event_repository import (
 from app.schemas.events import IngestResult, IngestStatus, ResultsReadyEvent
 from app.services import audit
 from app.services.group_service import Group, assign_group
+from app.services.queue_service import EpisodeStatus, queue_deadline
 
 
 class IngestService:
@@ -64,14 +66,16 @@ class IngestService:
             patient.group = assign_group(event.patient_token).value
         group_value = Group(patient.group)
 
-        # 5) Эпизод.
+        # 5) Эпизод. Основная группа ждёт отметки врача 24 часа от приёма (B4).
+        is_main = group_value is Group.MAIN
         episode = Episode(
             patient_id=patient.id,
             branch_id=branch.id,
             ordering_doctor_id=doctor.id,
             group=group_value.value,
-            status="open",
+            status=(EpisodeStatus.AWAITING_DOCTOR if is_main else EpisodeStatus.CONTROL).value,
             ready_at=event.ready_at,
+            queue_deadline_at=queue_deadline(utcnow()) if is_main else None,
         )
         self.session.add(episode)
         self.session.flush()

@@ -36,6 +36,8 @@ class Clinic(IdMixin, TimestampMixin, Base):
     theme: Mapped[str | None] = mapped_column(Text)  # JSON-строка с токенами
     # Стоп-кнопка клиники: если false, сервис для клиники выключен целиком.
     service_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Шаги врача, включённые клиникой (B4): JSON-список {code, title, weeks?}.
+    step_options: Mapped[str | None] = mapped_column(Text)
 
 
 class Branch(IdMixin, TimestampMixin, Base):
@@ -129,6 +131,8 @@ class Episode(IdMixin, TimestampMixin, Base):
     group: Mapped[str] = mapped_column(String(16), nullable=False)  # main | control
     status: Mapped[str] = mapped_column(String(32), default="open", nullable=False)
     ready_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Срок отметки врача (B4): время приёма события + 24 часа, только основная группа.
+    queue_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Step(IdMixin, TimestampMixin, Base):
