@@ -17,8 +17,10 @@ export async function render(view, ctx) {
       <p class="patient-doctor">${ctx.safe(step.doctor_name)}</p></div>` : '';
     page(view, ctx, template, `<div class="card patient-card">
       <p>${ctx.safe(texts[`p2.${step.code}.body`])}</p>
-      <button type="button" class="btn" data-patient-next>${ctx.safe(texts['p2.step.action'])}</button></div>`, '', author);
+      <button type="button" class="btn" data-patient-next>${ctx.safe(texts['p2.step.action'])}</button>
+      ${step.code === 'retest' && texts['p7.entry'] ? `<button type="button" class="btn text" data-patient-retest>${ctx.safe(texts['p7.entry'])}</button>` : ''}</div>`, '', author);
     view.querySelector('[data-patient-next]').addEventListener('click', () => ctx.go(patientPath(token, 'goal')));
+    view.querySelector('[data-patient-retest]')?.addEventListener('click', () => ctx.go(patientPath(token, 'retest')));
   } else {
     let selected = selectedBranch(token, session);
     page(view, ctx, texts['p2.branches.title'], `<form class="patient-form">
