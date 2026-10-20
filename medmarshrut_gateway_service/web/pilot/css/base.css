@@ -1,0 +1,77 @@
+/* Пилот rescan: оболочка, общие компоненты и состояния (FE1). Значения — токены дизайнера из tokens.css;
+   запасные значения в var(…) нужны, только если tokens.css не загрузился. Акцент клиники ставит theme.js. */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg, #F4F6F8);color:var(--fg, #212529);
+  font-family:var(--font, system-ui, sans-serif);font-size:var(--fs-body, 15px);line-height:var(--lh-body, 1.45);overflow-x:hidden}
+h1,h2,h3,p{margin:0}
+h1{font-size:var(--fs-title, 26px);line-height:var(--lh-title, 1.15);font-weight:var(--fw-bold, 600);letter-spacing:var(--ls-title, -0.01em)}
+h2{font-size:var(--fs-xl, 20px);line-height:1.25;font-weight:var(--fw-bold, 600)}
+p,h1,h2{overflow-wrap:anywhere}
+img{max-width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:var(--clinic-accent, #0B7A83)}
+:focus-visible{outline:var(--focus-w, 2px) solid var(--focus-ring, #0B7A83);outline-offset:var(--focus-offset, 2px);
+  box-shadow:0 0 0 calc(var(--focus-w, 2px) + var(--focus-offset, 2px)) var(--focus-halo, #FFFFFF)}
+.view:focus,[tabindex="-1"]:focus{outline:none;box-shadow:none}
+[hidden]{display:none!important}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* Шапка: логотип или название клиники слева, справа — сотрудник и плашка «демо» */
+.top{position:sticky;top:0;z-index:10;background:var(--surface, #FFFFFF);border-bottom:1px solid var(--line, #E1E6EC)}
+.top-in{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3, 12px);min-height:var(--header-h, 56px);
+  width:100%;max-width:calc(var(--col, 560px) + 2 * var(--gutter, 16px));margin:0 auto;padding:var(--sp-2, 8px) var(--gutter, 16px)}
+.brand{display:flex;align-items:center;min-width:0;flex:1 1 auto}
+.brand-name{font-size:var(--fs-l, 17px);font-weight:var(--fw-bold, 600);color:var(--fg, #212529);line-height:1.2;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.brand-logo{display:block;height:var(--logo-h, 32px);width:auto;max-width:var(--logo-max-w, 160px);object-fit:contain}
+.top-right{display:flex;align-items:center;gap:var(--sp-2, 8px);flex-wrap:wrap;justify-content:flex-end;min-width:0}
+.demo-badge,.demo-tag{display:inline-flex;align-items:center;flex-shrink:0;height:24px;padding:0 var(--sp-3, 12px);border-radius:var(--r-pill, 999px);
+  background:var(--demo-bg, #212529);color:var(--demo-fg, #FFFFFF);font-size:var(--fs-xs, 12px);font-weight:var(--fw-bold, 600);letter-spacing:.04em}
+.demo-tag{height:22px;padding:0 var(--sp-2, 8px)}
+
+/* Колонка содержимого: 360–1280 без горизонтальной прокрутки */
+.view{flex:1 0 auto;display:flex;flex-direction:column;gap:var(--sp-4, 16px);width:100%;max-width:calc(var(--col, 560px) + 2 * var(--gutter, 16px));
+  margin:0 auto;padding:var(--sp-5, 20px) var(--gutter, 16px) var(--sp-10, 40px);min-width:0}
+.foot{padding:var(--sp-4, 16px) var(--gutter, 16px) var(--sp-6, 24px);text-align:center;font-size:var(--fs-xs, 12px);color:var(--fg-3, #6B7380)}
+.stack{display:flex;flex-direction:column;gap:var(--sp-3, 12px)}
+.card{background:var(--surface, #FFFFFF);border-radius:var(--r-card, 24px);padding:var(--sp-5, 20px);box-shadow:var(--shadow-card, none);
+  display:flex;flex-direction:column;gap:var(--sp-3, 12px);min-width:0}
+.muted{color:var(--fg-2, #5B6370)}
+
+/* Кнопки: основная — заливка акцентом клиники, второстепенная — нейтральная, текстовая — акцент на белом */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2, 8px);min-height:var(--btn-h, 52px);padding:0 var(--sp-6, 24px);
+  border-radius:var(--r-pill, 999px);border:1px solid transparent;background:var(--clinic-accent, #0B7A83);color:var(--clinic-on-accent, #FFFFFF);
+  font-weight:var(--fw-bold, 600);font-size:var(--fs-body, 15px);text-decoration:none;cursor:pointer;text-align:center;
+  transition:background-color var(--dur, .2s) var(--ease, ease)}
+.btn:hover{background:var(--clinic-accent-hover, #096A72)}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.btn.secondary{background:var(--pill, #EEF1F5);color:var(--fg, #212529)}
+.btn.secondary:hover{background:var(--line, #E1E6EC)}
+.btn.text{background:none;color:var(--clinic-accent, #0B7A83);min-height:var(--tap, 48px);padding:0 var(--sp-2, 8px)}
+.btn.text:hover{text-decoration:underline;background:none}
+.btn.block{width:100%}
+
+/* Поля ввода */
+.field{display:flex;flex-direction:column;gap:var(--sp-2, 8px)}
+.field label{font-size:var(--fs-s, 13px);font-weight:var(--fw-bold, 600)}
+.input{width:100%;min-height:var(--field-h, 48px);padding:0 var(--sp-4, 16px);border-radius:var(--r-field, 12px);
+  border:1px solid var(--line-input, #8A929E);background:var(--surface, #FFFFFF);font-size:16px}
+
+/* Заметка и ошибка: нейтральный фон, без красного и без «!» */
+.note{background:var(--note-bg, #EEF1F5);color:var(--note-fg, #212529);border-radius:var(--r-row, 18px);padding:var(--sp-3, 12px) var(--sp-4, 16px);
+  font-size:var(--fs-s, 13px);line-height:1.5}
+
+/* Состояния: загрузка, ошибка, «такой страницы нет» */
+.card.skeleton span{display:block;height:14px;border-radius:7px;background:linear-gradient(90deg,var(--pill, #EEF1F5),var(--surface-2, #F7F8FB),var(--pill, #EEF1F5));
+  background-size:200% 100%;animation:p-shimmer 1.4s infinite linear}
+.card.skeleton span:first-child{width:45%;height:20px}
+.card.skeleton span:last-child{width:70%}
+@keyframes p-shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.card.skeleton span{animation:none}}
+.state{gap:var(--sp-4, 16px)}
+
+@media (min-width:768px){
+  .view{padding-top:var(--sp-8, 32px)}
+  .card{padding:var(--sp-6, 24px)}
+}

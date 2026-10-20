@@ -1,0 +1,10 @@
+/* Вход сотрудника и заглушки разделов (FE1). Колонка уже, чем у пациента: --col-staff */
+.staff-card,.staff-stub{width:100%;max-width:var(--col-staff, 420px);margin:0 auto}
+.staff-stub{max-width:none}
+.staff-form{display:flex;flex-direction:column;gap:var(--sp-4, 16px)}
+.staff-error:empty{display:none}
+.staff-bar{display:flex;align-items:center;gap:var(--sp-2, 8px);min-width:0;flex-wrap:wrap;justify-content:flex-end}
+.staff-who{display:flex;flex-direction:column;align-items:flex-end;min-width:0;line-height:1.2;text-align:right}
+.staff-name{font-size:var(--fs-s, 13px);font-weight:var(--fw-bold, 600);overflow-wrap:anywhere}
+.staff-role{font-size:var(--fs-xs, 12px);color:var(--fg-3, #6B7380)}
+.staff-logout{min-height:var(--tap, 48px)}
