@@ -41,7 +41,7 @@ export async function render(view, ctx) {
       if (!active()) return;
       if (response.ok !== true) throw new Error('choice_not_saved');
       chooseGoal(token, selected);
-      ctx.go(patientPath(token, 'next'));
+      ctx.go(patientPath(token, 'doctors'));
     } catch {
       if (active()) showFeedback(view, ctx, texts['p3.error']);
     } finally {

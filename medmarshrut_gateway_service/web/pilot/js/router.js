@@ -1,5 +1,6 @@
 /* Роутер пилота на hash-адресах: токен пациента не уходит на сервер в адресе запроса страницы.
-   Экран — модуль с export function render(view, ctx); ctx = { api, go, safe, theme, params, texts }.
+   Экран — модуль с export function render(view, ctx); ctx = { api, go, safe, theme, params, query, texts }.
+   query — параметры после '?' в hash-адресе (например, doctor на P5).
    Экран не трогает адрес и тему напрямую: только ctx.go('/путь' или '#/путь') и ctx.theme.apply(...).
    ctx.texts — тексты оболочки (SHELL из texts.js); тексты пациента приходят в ответе сессии.
    ROUTES: pattern — RegExp по пути без '#', именованные группы → ctx.params; load — динамический import(),
@@ -16,7 +17,13 @@ export const ROUTES = [
   {pattern:new RegExp(`^/p/${TOKEN}$`), area:'patient', load:() => import('./screens/patient-entry.js')},
   {pattern:new RegExp(`^/p/${TOKEN}/step$`), area:'patient', load:() => import('./screens/patient-step.js')},
   {pattern:new RegExp(`^/p/${TOKEN}/goal$`), area:'patient', load:() => import('./screens/patient-goal.js')},
-  {pattern:new RegExp(`^/p/${TOKEN}/next$`), area:'patient', load:() => import('./screens/patient-next.js')},
+  /* FE3: P4–P6. Старый адрес заглушки /next открывает P4 */
+  {pattern:new RegExp(`^/p/${TOKEN}/(?:doctors|next)$`), area:'patient', load:() => import('./screens/patient-doctors.js')},
+  {pattern:new RegExp(`^/p/${TOKEN}/request$`), area:'patient', load:() => import('./screens/patient-request.js')},
+  {pattern:new RegExp(`^/p/${TOKEN}/status$`), area:'patient', load:() => import('./screens/patient-status.js')},
+  /* FE4: P7, P8 (модули Codex-2) */
+  {pattern:new RegExp(`^/p/${TOKEN}/retest$`), area:'patient', load:() => import('./screens/patient-retest.js')},
+  {pattern:new RegExp(`^/p/${TOKEN}/after$`), area:'patient', load:() => import('./screens/patient-after.js')},
   {pattern:/^\/staff\/login$/, area:'staff', load:staff('login')},
   {pattern:/^\/doctor$/, area:'staff', load:staff('doctor')},
   {pattern:/^\/clinic$/, area:'staff', load:staff('clinic')}
@@ -28,6 +35,18 @@ export function currentPath(){
     return decodeURIComponent(window.location.hash.replace(/^#/, '').split('?')[0]);
   } catch {
     return '';
+  }
+}
+
+/* Параметры после '?' в адресе: '#/p/abc/request?doctor=d1' → { doctor: 'd1' }. Битая кодировка — пусто */
+export function currentQuery(){
+  const hash = window.location.hash;
+  const at = hash.indexOf('?');
+  if (at < 0) return {};
+  try {
+    return Object.fromEntries(new URLSearchParams(hash.slice(at + 1)));
+  } catch {
+    return {};
   }
 }
 
@@ -94,7 +113,7 @@ export async function renderCurrent(){
     const screen = await route.load();
     if (ticket !== generation) return;
     if (!screen || typeof screen.render !== 'function') throw new Error('экран без render');
-    const ctx = Object.freeze({api, go, safe, theme, params:Object.freeze(params), texts:SHELL});
+    const ctx = Object.freeze({api, go, safe, theme, params:Object.freeze(params), query:Object.freeze(currentQuery()), texts:SHELL});
     await screen.render(view, ctx);
   } catch (err){
     if (ticket !== generation) return;

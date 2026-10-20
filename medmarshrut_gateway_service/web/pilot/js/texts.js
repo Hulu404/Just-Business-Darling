@@ -18,7 +18,21 @@ export const SHELL = Object.freeze({
   demo_badge:'демо',
   demo_badge_label:'Демо-режим: все данные учебные',
   footer:'Сервис записи rescan',
-  brand:'rescan'
+  brand:'rescan',
+  /* Ошибки пациента, которые бывают до ответа сессии (p4-p8.md, «Ошибки до ответа сессии»): плоские ключи,
+     handlePatientError (screens/patient-errors.js) берёт их отсюда всегда, даже когда сессия загружена */
+  'err.link_not_found.title':'Ссылка не найдена',
+  'err.link_not_found.body':'Возможно, адрес скопировался не целиком или ссылка больше не действует. Откройте ссылку из сообщения ещё раз. Если не помогло, позвоните в клинику — администратор запишет вас к врачу.',
+  'err.not_configured.title':'Страница клиники ещё не настроена',
+  'err.not_configured.body':'Записаться здесь пока не получится. Позвоните в клинику — администратор запишет вас к врачу.',
+  'err.network.title':'Нет связи',
+  'err.network.body':'Проверьте интернет и нажмите «Повторить».',
+  'err.network.action':'Повторить',
+  'err.network.pending':'Проверяем…',
+  'err.server.title':'Сервис временно не отвечает',
+  'err.server.body':'Попробуйте ещё раз через минуту. Если не помогло, позвоните в клинику.',
+  'err.server.action':'Повторить',
+  'err.call.no_phone':'Номер телефона есть на сайте клиники.'
 });
 
 export const STAFF_TEXTS = Object.freeze({

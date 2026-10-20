@@ -112,3 +112,105 @@ export const PATIENT = {
   'demo-clinic-a': { ...PATIENT_BASE, clinic: PATIENT_CLINIC_A },
   'demo-clinic-b': { ...PATIENT_BASE, clinic: PATIENT_CLINIC_B },
 };
+
+// FE3: P4–P6 — врачи, форматы, окна времени, заявка. Тексты — docs/rescan-pilot/design/p4-p8.md.
+// mocks.js добавляет BOOKING_TEXTS к texts каждой сессии и берёт врачей, форматы и окна из BOOKING_CATALOG,
+// если у сессии нет своих. Поля doctors, formats, windows сессии наружу не уходят: их отдают свои пути.
+export const BOOKING_TEXTS = {
+  "p4.back": "Назад",
+  "p4.title": "Выберите врача",
+  "p4.body": "Здесь врачи, которые ведут приём по вашей цели. Формат и удобное время выберете дальше.",
+  "p4.tag.ordering": "Ваш врач",
+  "p4.tag.visited": "Вы уже были на приёме",
+  "p4.price_from": "от {price}",
+  "p4.card.action": "Выбрать",
+  "p4.empty.title": "Записаться здесь пока не получится",
+  "p4.empty.body": "По этой цели запись через страницу не работает. Позвоните в клинику — администратор подберёт врача и время.",
+  "p4.empty.change_goal": "Выбрать другую цель",
+  "p5.back": "Назад",
+  "p5.title": "Заявка на приём",
+  "p5.doctor.label": "Врач",
+  "p5.format.legend": "Формат",
+  "p5.format.prepay": "Оплата на сайте клиники после заявки",
+  "p5.window.legend": "Удобное время",
+  "p5.window.hint": "Администратор предложит время приёма в этом промежутке.",
+  "p5.confirm_note": "Это заявка, а не запись. Администратор клиники позвонит вам, подберёт точное время и подтвердит запись.",
+  "p5.action": "Оставить заявку",
+  "p5.choose": "Выберите формат и удобное время, чтобы продолжить.",
+  "p5.pending": "Отправляем…",
+  "p5.error": "Не получилось отправить заявку. Проверьте интернет и нажмите кнопку ещё раз — выбор сохранён.",
+  "p5.paid.title": "Заявка отправлена",
+  "p5.paid.body": "Этот формат клиника просит оплатить заранее. Оплата — на сайте клиники.",
+  "p5.paid.action": "Оплатить на сайте клиники",
+  "p5.paid.new_tab": "Сайт клиники откроется в новой вкладке.",
+  "p5.paid.later": "Посмотреть заявку",
+  "p5.paid.note": "Если оплатить не получилось, администратор подскажет, как это сделать, когда позвонит.",
+  "p5.no_doctor.title": "Этого врача нет в списке",
+  "p5.no_doctor.body": "Возможно, расписание изменилось. Выберите врача ещё раз.",
+  "p5.no_doctor.action": "К списку врачей",
+  "p6.accepted.title": "Заявка принята",
+  "p6.accepted.body": "Администратор клиники позвонит вам, подберёт точное время и подтвердит запись.",
+  "p6.in_progress.title": "Администратор подбирает время",
+  "p6.in_progress.body": "Он позвонит вам, чтобы договориться о приёме. Если пропустили звонок, позвоните в клинику сами.",
+  "p6.booked.title": "Вы записаны",
+  "p6.booked.body": "Дату и время приёма вам сообщил администратор. Чтобы перенести запись, позвоните в клинику.",
+  "p6.cancelled.title": "Заявка закрыта",
+  "p6.cancelled.body": "Клиника закрыла эту заявку. Если вы хотите записаться, позвоните в клинику — администратор поможет.",
+  "p6.progress.accepted": "Заявка принята",
+  "p6.progress.in_progress": "Администратор подбирает время",
+  "p6.progress.booked": "Вы записаны",
+  "p6.progress.current": "сейчас",
+  "p6.summary.doctor": "Врач",
+  "p6.summary.format": "Формат",
+  "p6.summary.window": "Удобное время",
+  "p6.summary.created": "Заявка от",
+  "p6.revisit": "Статус заявки можно посмотреть по этой же ссылке.",
+  // Решение координатора по вопросу 1 дизайнера: после booked и cancelled — новая заявка. Ключа в p4-p8.md пока нет
+  "p6.new_request": "Оставить новую заявку",
+};
+export const BOOKING_CATALOG = {
+  doctors: [
+    { id: 'doc-ordering', name: 'Иванова Анна Петровна', specialty: 'Терапевт', photo_url: null, tag: 'ordering' },
+    { id: 'doc-visited', name: 'Петров Сергей Иванович', specialty: 'Кардиолог', photo_url: null, tag: 'visited' },
+    { id: 'doc-other', name: 'Демо-врач очереди', specialty: 'Терапевт', photo_url: null, tag: null },
+  ],
+  formats: [
+    { id: 'fmt-clinic', title: 'Приём в клинике', price_kopecks: 250000, currency: 'RUB', payment_url: null },
+    { id: 'fmt-online', title: 'Онлайн-консультация', price_kopecks: 180000, currency: 'RUB', payment_url: null },
+    { id: 'fmt-quick', title: 'Быстрый ответ врача', price_kopecks: 90000, currency: 'RUB', payment_url: null },
+  ],
+  windows: [
+    { code: 'morning', title: 'Утром, 8:00–12:00' },
+    { code: 'day', title: 'Днём, 12:00–16:00' },
+    { code: 'evening', title: 'Вечером, 16:00–20:00' },
+    { code: 'any', title: 'В любое время' },
+  ],
+};
+// «Демо-клиника Б» — другой набор окон: экран берёт окна из ответа, а не из кода
+const CLINIC_B_WINDOWS = [
+  { code: 'weekday_am', title: 'В будни до обеда, 9:00–13:00' },
+  { code: 'weekday_pm', title: 'В будни после обеда, 14:00–20:00' },
+  { code: 'weekend', title: 'В выходные, 10:00–16:00' },
+];
+const BOOKING_STEP = { code: 'discuss', retest_weeks: null, doctor_name: 'Иванова Анна Петровна' };
+const BOOKING_CHOICE = { branch_code: null, goal_id: 'goal-discuss' };
+const BOOKING_REQUEST = {
+  id: 'req-demo', doctor_name: 'Иванова Анна Петровна', format_title: 'Приём в клинике',
+  window_title: 'Утром, 8:00–12:00', created_at: '2026-10-20T09:30:00+03:00',
+};
+const requestIn = status => ({
+  ...PATIENT_BASE, doctor_step: BOOKING_STEP, choice: BOOKING_CHOICE, request: { ...BOOKING_REQUEST, status },
+});
+export const BOOKING = {
+  'demo-clinic-b': { ...PATIENT['demo-clinic-b'], windows: CLINIC_B_WINDOWS },
+  'demo-no-doctors': { ...PATIENT_BASE, doctor_step: BOOKING_STEP, doctors: [] },
+  'demo-paid-format': {
+    ...PATIENT_BASE, doctor_step: BOOKING_STEP,
+    formats: BOOKING_CATALOG.formats.map(format => (format.id === 'fmt-quick'
+      ? { ...format, payment_url: 'https://example-clinic.ru/pay/quick-answer' } : format)),
+  },
+  'demo-request-accepted': requestIn('accepted'),
+  'demo-request-in-progress': requestIn('in_progress'),
+  'demo-request-booked': requestIn('booked'),
+  'demo-request-cancelled': requestIn('cancelled'),
+};

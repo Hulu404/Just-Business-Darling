@@ -25,11 +25,14 @@ export async function render(view, ctx) {
   const form = view.querySelector('form');
   const active = () => current() && form.isConnected !== false;
   const button = form.querySelector('button');
+  /* Незавершённая заявка — сразу к её статусу (P6); после booked и cancelled — обычный путь */
+  const open = ['accepted', 'in_progress'].includes(session.request?.status);
+  const next = patientPath(token, open ? 'status' : 'step');
   let busy = false;
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (busy) return;
-    if (!consent) { ctx.go(patientPath(token, 'step')); return; }
+    if (!consent) { ctx.go(next); return; }
     busy = true;
     button.disabled = true;
     button.textContent = texts['p1.consent.pending'];
@@ -38,7 +41,7 @@ export async function render(view, ctx) {
       const response = await ctx.api('POST', '/patient/consent');
       if (!active()) return;
       if (response.ok !== true) throw new Error('consent_not_saved');
-      ctx.go(patientPath(token, 'step'));
+      ctx.go(next);
     } catch {
       if (active()) showFeedback(view, ctx, texts['p1.consent.error']);
     } finally {

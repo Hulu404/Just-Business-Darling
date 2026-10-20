@@ -271,7 +271,7 @@ test('goal shows four options and sends only the selected branch and goal', asyn
   assert.deepEqual(f.calls[1], { method: 'POST', path: '/patient/choice', body: {
     branch_code: f.session.branches[0].code, goal_id: f.session.goals[2].id,
   } });
-  assert.deepEqual(f.routes, ['#/p/demo-active/next']);
+  assert.deepEqual(f.routes, ['#/p/demo-active/doctors']);
 });
 
 test('a direct goal link without a branch returns to step', async () => {
@@ -308,7 +308,7 @@ test('double submission sends one choice request', async () => {
   assert.equal(f.calls.length, 2);
   resolve({ ok: true });
   await pending;
-  assert.deepEqual(f.routes, ['#/p/demo-step-followup/next']);
+  assert.deepEqual(f.routes, ['#/p/demo-step-followup/doctors']);
 });
 
 for (const screen of [step, goal, next]) {

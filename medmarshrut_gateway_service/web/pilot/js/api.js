@@ -6,6 +6,8 @@ import { respond } from './mocks.js';
 
 export const MODE = 'mock';
 const MOCK_DELAY_MS = 180;
+/* Мок-токен, на котором api() имитирует обрыв сети: ApiError(0, 'network', …) до любого ответа */
+const NETWORK_ERROR_TOKEN = 'demo-error-network';
 
 export class ApiError extends Error {
   constructor(status, code, message){
@@ -28,6 +30,9 @@ export async function api(method, path, body){
   const verb = String(method || '').toUpperCase();
   if (MODE !== 'mock') throw new ApiError(503, 'live_disabled', 'Сервис ещё не подключён.');
   await wait(MOCK_DELAY_MS);
+  if (patientToken === NETWORK_ERROR_TOKEN && verb && String(path || '').startsWith('/patient/')){
+    throw new ApiError(0, 'network', 'Нет связи с сервисом. Проверьте интернет и попробуйте ещё раз.');
+  }
   const result = respond(verb, String(path || ''), copy(body), {token:patientToken});
   if (result.error){
     const {status, code, message} = result.error;
