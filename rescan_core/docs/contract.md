@@ -155,3 +155,145 @@ AND queue_deadline_at > now`: из двух одновременных отме�
 `topic = "episode.default_message"`, payload `{"episode_id"}`, аудит
 `queue.expired` от `system`. Возвращает число переведённых эпизодов; повтор — `0`.
 `now` без пояса считается UTC. HTTP-ручки нет; планировщик — в B5.
+
+## B6: API пациента (зафиксирован 20.10.2026)
+
+Страница пациента по личной ссылке. Все пути — с префиксом `/v1/patient`, токен
+ссылки — в заголовке `X-Patient-Link`. HTTP-выдачи ссылок нет: их выдаёт доставка (B5).
+
+### Ссылка
+
+Таблица `patient_links`: `id`, `episode_id`, `token_hash` (уникальный), `expires_at`,
+`revoked_at`, `created_at`. Токен — `secrets.token_urlsafe(32)`, в базе только
+`HMAC-SHA256(patient_link_secret, токен)` в hex (`app/security/patient_link.py`).
+`issue_link(session, episode_id, now)` в `app/services/patient_service.py` возвращает токен
+один раз; эпизоду контрольной группы и несуществующему ссылка не выдаётся (`LookupError`).
+Демо: `python -m scripts.issue_link <episode_id> [--base-url http://127.0.0.1:8763]`
+печатает `…/assets/pilot/index.html#/p/<токен>`.
+
+Настройки: `PATIENT_LINK_SECRET` (вне `local` и `test` — от 32 символов, без префикса
+`dev-`), `PATIENT_LINK_TTL_DAYS` — от 1 до 90, по умолчанию 30.
+
+Нет заголовка, токен не `[A-Za-z0-9_-]{16,128}`, хэша нет в базе, ссылка отозвана, эпизод
+контрольной группы — одинаковый ответ `404 link_not_found`.
+
+### Настройки клиники
+
+`clinics.patient_settings` — JSON-строка:
+
+```json
+{
+  "phone": "+7 000 000-00-00",
+  "privacy_url": "https://example-clinic.ru/privacy",
+  "timezone": "Europe/Moscow",
+  "branches": [{"code": "discuss", "title": "…", "hint": "…"}],
+  "windows": [{"code": "morning", "title": "Утром, 8:00–12:00"}],
+  "texts": {"p1.active.title": "…"}
+}
+```
+
+Обязательны `timezone` (имя пояса IANA), непустые `branches` и `windows` без повторов `code`
+(`code` ветки — до 16 символов, окна — до 64) и объект `texts` со строками. Пусто, не JSON
+или не по схеме — `503 not_configured` на всех путях. Значений по умолчанию нет.
+`phone` и `privacy_url` необязательны; `privacy_url` и `payment_url` отдаются только
+`https://`, иначе `null`. Тема — `clinics.theme` с ключами `name`, `logo_url`, `accent`;
+старые ключи `logo` и `title` переименовала миграция `20261020_patient_api`, ответ их не читает.
+
+Врачи цели — таблица `goal_doctors` (`goal_id`, `doctor_id`, `sort_order`, первичный ключ —
+пара). Выбор пациента — `episodes.chosen_branch` и `episodes.chosen_goal_id`.
+
+### Порядок проверок и ошибки
+
+Ссылка (404) → тело по схеме (422) → настройки клиники (503) → состояние (409
+`not_active`, кроме `GET /session`) → согласие (409 `consent_required`, кроме
+`GET /session` и `POST /consent`) → выбор цели (409 `choice_required` для `doctors`,
+`formats`, `requests`) → значения из списков (422). Исключение: тело, которое не
+разбирается как JSON, получает 422 раньше проверки ссылки.
+
+| Код | `code` | Когда |
+|---|---|---|
+| 404 | `link_not_found` | см. «Ссылка» |
+| 409 | `not_active` | `state` не `active` |
+| 409 | `consent_required` | нет согласия `pd_processing` |
+| 409 | `choice_required` | цель не выбрана |
+| 409 | `request_exists` | у эпизода есть заявка в `new`, `sent` или `in_progress` |
+| 422 | `invalid_input` | тело не по схеме, лишние поля, значение не из списка |
+| 503 | `not_configured` | настройки клиники неполные |
+
+Тело ошибки: `{"detail": {"code": "…", "message": "…"}}`, `message` по-русски.
+Ответ 422 обезличен: тело запроса и `input` в него не попадают.
+
+### GET /v1/patient/session
+
+`state`: `unsubscribed` (`patients.opted_out`) → `stopped` (`clinics.service_enabled =
+false`) → `expired` (`expires_at <= now`) → `active`, проверяются в этом порядке.
+Не `active` — в ответе только `state`, `clinic` и `texts`. `active`:
+
+```json
+{
+  "state": "active",
+  "clinic": {"name": "…", "phone": "…", "privacy_url": "https://…",
+             "theme": {"name": "…", "logo_url": null, "accent": "#1D5FD1"}},
+  "consent_required": false,
+  "doctor_step": {"code": "retest", "retest_weeks": 4, "due_date": "2026-11-17",
+                  "retest_state": "before", "doctor_name": "…"},
+  "branches": [{"code": "discuss", "title": "…", "hint": "…"}],
+  "goals": [{"id": "…", "title": "…"}],
+  "choice": {"branch_code": null, "goal_id": "…"},
+  "request": {"id": "…", "status": "accepted", "doctor_name": "…",
+              "format_title": "…", "window_title": "…", "created_at": "…"},
+  "texts": {}
+}
+```
+
+- `doctor_step` — последний шаг эпизода с `set_by_doctor_id`, иначе `null`. Для `retest`:
+  `retest_weeks` = (`due_date` − `set_at`) в неделях, `due_date` — дата в поясе клиники,
+  `retest_state` — `before`, `today` или `overdue` по сегодняшней дате в поясе клиники.
+  Для других кодов эти три поля `null`.
+- `goals` — активные цели клиники по `sort_order`. `choice` — `null`, пока цель не выбрана.
+- `request` — последняя заявка в `new`, `sent`, `in_progress`, иначе последняя в `booked`
+  или `cancelled`, иначе `null`. Статус для пациента: `new`, `sent` → `accepted`, остальные
+  как есть. `window_title` — `null`, если окна больше нет в настройках.
+- `consent_required` — нет записи `consents` с `kind = pd_processing`, `granted = true`.
+- Телефона пациента, `patient_token`, групп и данных о здоровье в ответе нет.
+
+### POST /v1/patient/consent
+
+Без тела → `200 {"ok": true}`. Пишет `consents` (`pd_processing`, `granted`,
+`source = link`) и аудит `patient.consent` (`entity_id` — эпизод, без payload). Повтор
+ничего не пишет.
+
+### POST /v1/patient/choice
+
+`{"branch_code": "discuss" | null, "goal_id": "…"}`, `extra="forbid"` → `200 {"ok": true}`.
+Врач отметил шаг — `branch_code` только `null` (или не передан); не отметил — обязателен и
+из `branches`. `goal_id` — активная цель клиники пациента. Иначе 422. Повтор перезаписывает.
+
+### GET /v1/patient/doctors
+
+`{"doctors": [{"id", "name", "specialty", "photo_url", "tag"}]}` для выбранной цели:
+
+1. Врач, назначивший анализы (`episodes.ordering_doctor_id`), если активен — `"ordering"`.
+2. Врачи цели, у которых пациент уже был (`visits` по `patient_token` и
+   `doctor_external_id` в этой клинике), сначала последний визит — `"visited"`.
+3. Остальные врачи цели по `sort_order` — `null`.
+
+Без повторов, только активные врачи этой клиники. Нет врачей — `{"doctors": []}`.
+
+### GET /v1/patient/formats
+
+`{"formats": [{"id", "title", "price_kopecks", "currency", "has_payment"}], "windows":
+[{"code", "title"}]}` — активные форматы клиники; `has_payment` — у формата `https://`
+адрес оплаты. Сам адрес здесь не отдаётся.
+
+### POST /v1/patient/requests
+
+`{"doctor_id", "format_id", "window_code"}`, `extra="forbid"` → `201 {"request_id",
+"status": "accepted", "payment_url": "https://…" | null}`.
+
+- Врач — из `GET /doctors` для выбранной цели, формат активный, окно из `windows`, иначе 422.
+- Создаёт `requests` (`status = new`, `goal_id` из выбора, `window = window_code`), `outbox`
+  с `topic = crm` и `payload = {"request_id"}`, аудит `patient.request_created`
+  (payload `{"request_id"}`). Телефона нет ни в `outbox`, ни в аудите.
+- Одна незавершённая заявка на эпизод: перед проверкой строка эпизода блокируется условным
+  `UPDATE`, из двух одновременных запросов проходит один, второй получает 409.

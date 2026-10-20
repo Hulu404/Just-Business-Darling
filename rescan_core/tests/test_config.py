@@ -12,6 +12,7 @@ def secure_settings():
         "pilot_salt": "test-pilot-" + "b" * 32,
         "contact_encryption_key": "test-key-" + "c" * 32,
         "contact_hash_salt": "test-hash-" + "d" * 32,
+        "patient_link_secret": "test-link-" + "e" * 32,
         "staff_tokens": {},
         "mis_clinic_id": "test-clinic",
     }
@@ -24,7 +25,7 @@ def test_production_rejects_defaults():
 
 @pytest.mark.parametrize("field", [
     "mis_hmac_secret", "pilot_salt", "contact_encryption_key", "contact_hash_salt",
-    "staff_tokens", "mis_clinic_id",
+    "staff_tokens", "mis_clinic_id", "patient_link_secret",
 ])
 def test_each_missing_production_setting_is_rejected(field):
     values = secure_settings()

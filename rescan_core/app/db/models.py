@@ -23,7 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, IdMixin, TimestampMixin
+from app.db.base import Base, IdMixin, TimestampMixin, utcnow
 
 
 class Clinic(IdMixin, TimestampMixin, Base):
@@ -38,6 +38,8 @@ class Clinic(IdMixin, TimestampMixin, Base):
     service_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Шаги врача, включённые клиникой (B4): JSON-список {code, title, weeks?}.
     step_options: Mapped[str | None] = mapped_column(Text)
+    # Настройки страницы пациента (B6): JSON-строка с телефоном, ветками, окнами и текстами.
+    patient_settings: Mapped[str | None] = mapped_column(Text)
 
 
 class Branch(IdMixin, TimestampMixin, Base):
@@ -133,6 +135,10 @@ class Episode(IdMixin, TimestampMixin, Base):
     ready_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     # Срок отметки врача (B4): время приёма события + 24 часа, только основная группа.
     queue_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Выбор пациента по ссылке (B6): ветка, если врач не отметил шаг, и цель визита.
+    chosen_branch: Mapped[str | None] = mapped_column(String(16))
+    chosen_goal_id: Mapped[str | None] = mapped_column(
+        ForeignKey("goals.id", name="fk_episodes_chosen_goal_id"))
 
 
 class Step(IdMixin, TimestampMixin, Base):
@@ -255,6 +261,31 @@ class Outbox(IdMixin, TimestampMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PatientLink(IdMixin, Base):
+    """Личная ссылка пациента (B6). В базе только HMAC токена, сам токен не хранится."""
+
+    __tablename__ = "patient_links"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_patient_link_hash"),)
+
+    episode_id: Mapped[str] = mapped_column(ForeignKey("episodes.id"), nullable=False,
+                                            index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 nullable=False)
+
+
+class GoalDoctor(Base):
+    """Врачи цели визита (B6) в порядке клиники. Терапевта клиника кладёт первым."""
+
+    __tablename__ = "goal_doctors"
+
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), primary_key=True)
+    doctor_id: Mapped[str] = mapped_column(ForeignKey("doctors.id"), primary_key=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 # Связи только там, где реально нужны (для удобных запросов B4/B6/B10).

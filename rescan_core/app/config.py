@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     contact_encryption_key: str = "dev-encryption-key-change-me"  # noqa: S105
     contact_hash_salt: str = "dev-hash-salt"  # noqa: S105
 
+    # --- B6: ссылки пациента ---
+    patient_link_secret: str = "dev-patient-link-secret"  # noqa: S105
+    patient_link_ttl_days: int = Field(default=30, ge=1, le=90)
+
     # --- Роли / служебные токены (dev). JSON в env. ---
     staff_tokens: dict[str, StaffToken] = {
         "dev-admin-token": StaffToken(role="administrator", actor_id="dev-admin"),
@@ -67,6 +71,7 @@ class Settings(BaseSettings):
             return self
         for name in (
             "mis_hmac_secret", "pilot_salt", "contact_encryption_key", "contact_hash_salt",
+            "patient_link_secret",
         ):
             value = getattr(self, name)
             if len(value.strip()) < 32 or value.startswith("dev-"):
