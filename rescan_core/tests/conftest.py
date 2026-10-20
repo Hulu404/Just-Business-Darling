@@ -33,7 +33,17 @@ def empty_engine(tmp_path):
         admin = create_engine(postgres_url)
         with admin.begin() as conn:
             conn.execute(text(f'CREATE SCHEMA "{schema}"'))
-        engine = create_engine(postgres_url, connect_args={"options": f"-csearch_path={schema}"})
+        # Пулер Supabase не передаёт параметр options, поэтому схему ставим командой
+        # на каждом новом соединении и проверяем, что она применилась.
+        engine = create_engine(postgres_url)
+
+        @event.listens_for(engine, "connect")
+        def use_test_schema(connection, _):
+            with connection.cursor() as cursor:
+                cursor.execute(f'SET search_path TO "{schema}"')
+                cursor.execute("SHOW search_path")
+                assert cursor.fetchone()[0].strip('"') == schema, "search_path не применился"
+            connection.commit()
     else:
         engine = create_engine(
             "sqlite+pysqlite:///" + (tmp_path / "test.sqlite3").as_posix(),
