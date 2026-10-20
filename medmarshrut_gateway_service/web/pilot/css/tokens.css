@@ -34,6 +34,8 @@
   --note-fg: #212529;
   --demo-bg: #212529;     /* плашка «демо» */
   --demo-fg: #FFFFFF;
+  --tag-bg: #EEF1F5;      /* метки «Ваш врач», «Вы уже были на приёме», кружок инициалов (задание 19) */
+  --tag-fg: #212529;      /* 13,7:1 с --tag-bg; инициалы — --fg-2, 5,4:1; не акцент: метка сообщает факт, а не оценку */
   --focus-ring: var(--clinic-accent);
   --focus-halo: #FFFFFF;
 
@@ -78,6 +80,7 @@
   --field-h: 48px;
   --logo-h: 32px;
   --logo-max-w: 160px;
+  --avatar: 56px;         /* фото или инициалы врача на P4 и P5 */
   --focus-w: 2px;
   --focus-offset: 2px;
 
