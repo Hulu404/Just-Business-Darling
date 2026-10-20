@@ -46,7 +46,9 @@
 .booking-summary dt{font-size:var(--fs-s, 13px);color:var(--fg-2, #5B6370)}
 .booking-summary dd{margin:0;overflow-wrap:anywhere}
 
+/* Узкий экран: «Выбрать ›» не прячем — она уходит отдельной строкой вправо, карточка остаётся одной ссылкой */
 @media (max-width:374px){
   .booking-doctor{gap:var(--sp-2, 8px)}
-  .booking-doctor-action{display:none}
+  .patient-page a.booking-doctor-link{flex-wrap:wrap}
+  .booking-doctor-action{flex-basis:100%;text-align:right}
 }

@@ -1,11 +1,20 @@
 import { beginRender, patientPath, requiresEntry, formatText } from './patient-state.js';
 import { skeleton } from '../ui.js';
+import { handlePatientError } from './patient-errors.js';
 
 export async function loadPatient(view, ctx, entry = false) {
   const current = beginRender(view);
   view.innerHTML = skeleton();
   const loading = view.firstElementChild;
-  const session = await ctx.api('GET', '/patient/session');
+  let session;
+  try {
+    session = await ctx.api('GET', '/patient/session');
+  } catch (err) {
+    /* Ошибки сессии — экраны из каркаса ошибок пациента; что не из контракта, показывает роутер */
+    if (!current()) return null;
+    if (handlePatientError(err, view, ctx)) return null;
+    throw err;
+  }
   if (!current() || view.firstElementChild !== loading) return null;
   const token = ctx.params.token;
   const theme = { ...session.clinic.theme, name: session.clinic.name };

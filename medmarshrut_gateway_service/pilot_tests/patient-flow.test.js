@@ -194,6 +194,29 @@ test('failed consent stays on entry and allows another attempt', async () => {
   assert.equal(form.querySelector('button').disabled, false);
 });
 
+/* Ошибки сессии на P1–P3 — экраны из каркаса ошибок пациента (p4-p8.md), как на P4–P8 */
+for (const [status, code, kind] of [[404, 'link_not_found', 'link_not_found'], [503, 'not_configured', 'not_configured'],
+  [0, 'network', 'network'], [500, 'server_error', 'server']]) {
+  test(`${kind} on the session request shows the patient error screen on P1–P3`, async () => {
+    for (const render of [entry, step, goal]) {
+      const f = fixture('demo-active');
+      f.ctx.api = async () => { throw Object.assign(new Error(code), { status, code }); };
+      await render(f.view, f.ctx);
+      assert.ok(f.view.innerHTML.includes(SHELL[`err.${kind}.title`]), `${kind}: ${render.name}`);
+      assert.ok(f.view.innerHTML.includes(SHELL[`err.${kind}.body`]));
+      if (status === 0 || status === 500) assert.ok(f.view.querySelector('[data-patient-retry]'));
+      else assert.ok(f.view.innerHTML.includes(SHELL['err.call.no_phone']));
+      assert.ok(!f.view.innerHTML.includes(SHELL.error.title));
+    }
+  });
+}
+
+test('an error outside the patient contract still reaches the router', async () => {
+  const f = fixture('demo-active');
+  f.ctx.api = async () => { throw new Error('broken screen'); };
+  await assert.rejects(entry(f.view, f.ctx), /broken screen/);
+});
+
 test('closed clinic without a phone uses the approved fallback copy', async () => {
   const f = fixture('demo-clinic-b');
   f.session.state = 'stopped';
