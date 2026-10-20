@@ -454,7 +454,9 @@ PILOT_PATIENT = [  # (адрес, что проверить сверх обще�
     ("#/p/demo-expired", "closed"), ("#/p/demo-stopped", "closed"), ("#/p/demo-unsubscribed", "closed"),
     ("#/p/demo-step-discuss/step", "doctor_step"), ("#/p/demo-step-retest/step", "retest"),
     ("#/p/demo-step-followup/step", "doctor_step"), ("#/p/demo-active/step", "branches"),
-    ("#/p/demo-active/goal", "goals"), ("#/p/demo-active/next", "stub"),
+    # без шага врача P3 возвращает на выбор ветки, поэтому цели проверяем у пациента с шагом врача
+    ("#/p/demo-step-discuss/goal", "goals"), ("#/p/demo-active/next", "stub"),
+    ("#/p/demo-clinic-a", "entry"), ("#/p/demo-clinic-b", "entry"),
 ]
 PILOT_STAFF = ["#/staff/login", "#/doctor", "#/clinic"]
 PILOT_BAD_LOGIN = "Логин или пароль не подошли. Проверьте и попробуйте ещё раз"
