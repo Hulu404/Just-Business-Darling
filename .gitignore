@@ -36,3 +36,6 @@ rescan_core/*.local
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Личные итоги дня ---
+PROGRESS_*.md
