@@ -919,7 +919,8 @@ def p7_retest(page) -> list[str]:
             continue
         text = page.inner_text("#view")
         texts.add(text)
-        if not PILOT_DATE.search(text):
+        # p4-p8.md: дата — в заголовке «до» и в тексте «просрочено»; у «сегодня» её нет по тексту дизайнера
+        if token != "demo-retest-today" and not PILOT_DATE.search(text):
             failures.append(f"{token}: нет даты пересдачи вида «17 ноября»")
         failures += pilot_calm(page, token)
         failures += pilot_book_button(page, token)
@@ -1020,6 +1021,8 @@ def key_act(page, predicate: str, what: str, key: str = "Enter", arg=None) -> li
     if not press_to(page, predicate, arg):
         raise PilotStop(f"{what}: не дойти клавишей Tab")
     seen = page.evaluate("() => window.__qa.focusVisible()")
+    # Метка старого экрана: адрес меняется раньше, чем роутер перерисует #view
+    page.evaluate("() => document.querySelector('#view').firstElementChild?.setAttribute('data-qa-old', '')")
     page.keyboard.press(key)
     return [] if seen else [f"{what}: фокус не виден"]
 
@@ -1027,6 +1030,11 @@ def key_act(page, predicate: str, what: str, key: str = "Enter", arg=None) -> li
 def key_wait(page, suffix: str, what: str) -> None:
     if not pilot_wait(page, suffix):
         raise PilotStop(f"{what} открыл {pilot_path(page)}, ждали …{suffix}")
+    try:
+        page.wait_for_function("() => !document.querySelector('#view [data-qa-old]')", timeout=8000)
+        wait_ready(page)
+    except PlaywrightError:
+        raise PilotStop(f"{what}: экран {pilot_path(page)} не перерисовался") from None
 
 
 def key_request(page, token: str) -> list[str]:
