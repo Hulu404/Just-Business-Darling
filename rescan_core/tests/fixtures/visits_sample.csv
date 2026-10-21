@@ -1,0 +1,5 @@
+patient_token,visit_date,paid_amount,doctor_id
+pt-0001,2026-10-20T10:15:00,3500,doc-1
+pt-0002,2026-10-20T12:00:00,4200,doc-2
+pt-0003,2026-10-21T09:30:00,,doc-1
+pt-0004,2026-10-22T16:45:00,0,doc-3

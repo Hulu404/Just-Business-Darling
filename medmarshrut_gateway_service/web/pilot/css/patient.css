@@ -1,0 +1,34 @@
+/* Экраны пациента P1–P3 (FE2). Только токены из tokens.css; кнопки, карточки и заметки — из base.css (FE1). */
+.patient-page{width:100%;max-width:var(--col, 560px);margin:0 auto;display:grid;gap:var(--sp-5, 20px);overflow-wrap:anywhere;min-width:0}
+.patient-heading,.patient-card,.patient-form{display:grid;gap:var(--sp-4, 16px);min-width:0}
+.patient-heading h1:focus{outline:none;box-shadow:none}
+.patient-muted{color:var(--fg-2, #5B6370)}
+.patient-small{font-size:var(--fs-s, 13px)}
+.patient-author{display:grid;gap:var(--sp-1, 4px)}
+.patient-eyebrow{font-size:var(--fs-s, 13px)}
+.patient-doctor{font-size:var(--fs-l, 17px);font-weight:var(--fw-medium, 500)}
+.patient-help{display:grid;gap:var(--sp-3, 12px)}
+.patient-page .btn{width:100%;white-space:normal;overflow-wrap:anywhere;padding-top:var(--sp-2, 8px);padding-bottom:var(--sp-2, 8px)}
+.patient-page .btn.text{width:auto;justify-self:start;padding:0 var(--sp-1, 4px)}
+.patient-page a:not(.btn){min-height:var(--tap, 48px);display:inline-flex;align-items:center;justify-self:start}
+
+/* Варианты выбора: строка во всю ширину; выбранный — рамка 2 px акцентом, мягкий фон и галочка справа */
+.patient-options{display:grid;gap:var(--sp-3, 12px);border:0;padding:0;margin:0;min-width:0}
+.patient-option{position:relative;display:flex;flex-direction:row;align-items:flex-start;gap:var(--sp-3, 12px);min-height:var(--tap, 48px);
+  padding:calc(var(--sp-4, 16px) - 1px) calc(var(--sp-10, 40px) - 1px) calc(var(--sp-4, 16px) - 1px) calc(var(--sp-4, 16px) - 1px);
+  border:1px solid var(--line-input, #8A929E);border-radius:var(--r-row, 18px);background:var(--surface, #FFFFFF);box-shadow:none;cursor:pointer;
+  transition:background-color var(--dur, .2s) var(--ease, ease)}
+.patient-option input{width:20px;height:20px;flex:0 0 20px;margin:2px 0 0;accent-color:var(--clinic-accent, #0B7A83)}
+.patient-option:has(input:checked){border:2px solid var(--clinic-accent, #0B7A83);background:var(--clinic-accent-soft, #EEF6F6);
+  padding:calc(var(--sp-4, 16px) - 2px) calc(var(--sp-10, 40px) - 2px) calc(var(--sp-4, 16px) - 2px) calc(var(--sp-4, 16px) - 2px)}
+.patient-option:has(input:checked)::after{content:"";position:absolute;right:var(--sp-4, 16px);top:50%;width:6px;height:12px;margin-top:-8px;
+  border:solid var(--fg, #212529);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.patient-option:has(input:focus-visible){outline:var(--focus-w, 2px) solid var(--focus-ring, #0B7A83);outline-offset:var(--focus-offset, 2px)}
+.patient-option input:focus-visible{outline:none;box-shadow:none}
+.patient-option-title,.patient-option-hint{display:block}
+.patient-option-title{font-weight:var(--fw-bold, 600)}
+.patient-option-hint{margin-top:var(--sp-1, 4px);font-size:var(--fs-s, 13px);color:var(--fg-2, #5B6370)}
+
+.patient-feedback:empty{display:none}
+.patient-feedback:focus{outline:none;box-shadow:none}
+@media (max-width:390px){.patient-card{padding:var(--sp-4, 16px)}}

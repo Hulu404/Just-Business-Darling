@@ -1,0 +1,5 @@
+/* P7 и P8 (FE4): памятка и кнопки после неё. Только токены пилота, без тревожных цветов. */
+.patient-care-memo{display:grid;gap:var(--sp-2, 8px)}
+.patient-care-memo h2{font-size:var(--fs-l, 17px);line-height:var(--lh-body, 1.45)}
+.patient-care-memo ul{margin:0;padding-left:var(--sp-5, 20px);display:grid;gap:var(--sp-2, 8px)}
+.patient-care-actions{display:grid;gap:var(--sp-3, 12px);min-width:0}

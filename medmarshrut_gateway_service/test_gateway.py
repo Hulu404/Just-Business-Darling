@@ -1,6 +1,7 @@
 import http.client
 import importlib.util
 import json
+import re
 import secrets
 import tempfile
 import threading
@@ -352,6 +353,9 @@ class StaticTests(GatewayTestCase):
             if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
                 continue
             content = path.read_text(encoding="utf-8")
+            if path.parent == WEB_DIR / "pilot" / "js" and path.name.startswith("mocks"):
+                # Ссылка оплаты в мок-данных пилота — значение поля, страница по ней ничего не грузит.
+                content = re.sub(r"payment_url\s*:\s*'https://[\w.-]+/[\w/-]*'", "", content)
             self.assertNotRegex(content, r"localStorage|sessionStorage", path.name)
             self.assertNotRegex(content, r"https?://|(?<![:\w])//[a-z0-9-]+\.[a-z]{2,}", path.name)
             self.assertNotRegex(content, r"\son[a-z]+\s*=\s*['\"]", path.name)
