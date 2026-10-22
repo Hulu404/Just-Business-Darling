@@ -118,7 +118,7 @@ class Contact(IdMixin, TimestampMixin, Base):
     channel: Mapped[str] = mapped_column(String(16), default="sms")
     phone_enc: Mapped[str] = mapped_column(Text, nullable=False)
     phone_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-
+    telegram_id: Mapped[str | None] = mapped_column(String(64))
 
 class Episode(IdMixin, TimestampMixin, Base):
     """Эпизод — один проход пациента по маршруту после готовности анализов."""

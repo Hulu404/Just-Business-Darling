@@ -133,6 +133,7 @@ class QueueService:
         audit.record(self.session, action="doctor.step_marked", actor_id=actor_id,
                      role="doctor", entity="episode", entity_id=episode_id, payload=details)
         _outbox(self.session, "episode.doctor_marked", {"episode_id": episode_id, **details}, now)
+        _outbox(self.session, "notification", {"episode_id": episode_id, "template": "doctor_marked"}, now)
         self.session.commit()
         return StepMarkResult(episode_id=episode_id, step_id=step.id,
                               status=EpisodeStatus.DOCTOR_MARKED.value)
@@ -161,6 +162,7 @@ def expire_overdue(session: Session, now: datetime) -> int:
         audit.record(session, action="queue.expired", actor_id=SYSTEM_ACTOR, role=SYSTEM_ACTOR,
                      entity="episode", entity_id=episode_id)
         _outbox(session, "episode.default_message", {"episode_id": episode_id}, now)
+        _outbox(session, "notification", {"episode_id": episode_id, "template": "default"}, now)
         expired += 1
     session.commit()
     return expired

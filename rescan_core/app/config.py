@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     pilot_salt: str = "dev-pilot-salt"  # noqa: S105
     control_percent: int = Field(default=25, ge=0, le=50)
 
+    # --- B5: Доставка Telegram (и SMS как fallback) ---
+    telegram_bot_token: str = "dev-telegram-token"
+    telegram_api_url: str = "http://localhost:8080"  # Локальный шлюз
+    telegram_enabled: bool = True
+    sms_api_url: str = "http://127.0.0.1:8082/send"
+    sms_fallback_enabled: bool = False 
+    
     # --- B11: защита контактов ---
     contact_encryption_key: str = "dev-encryption-key-change-me"  # noqa: S105
     contact_hash_salt: str = "dev-hash-salt"  # noqa: S105
